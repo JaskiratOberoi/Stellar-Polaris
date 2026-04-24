@@ -7,6 +7,8 @@ import { SidGrid, type SidEntry } from './components/SidGrid';
 import { getRunStatus, postRun, postStop } from './lib/api';
 import { connectRunWebSocket } from './lib/wsClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
+import { Label } from './components/ui/label';
+import { Switch } from './components/ui/switch';
 
 const initialEnabled: Record<TestCodeId, boolean> = { BI235: true, BI005: true, BI133: true };
 
@@ -24,7 +26,8 @@ function buildRunConfig(
   fromDate: string,
   toDate: string,
   fromHour: string,
-  toHour: string
+  toHour: string,
+  authenticate: boolean
 ): RunConfig {
   const c: RunConfig = {
     testCodes,
@@ -32,6 +35,7 @@ function buildRunConfig(
     statusLabels: statuses,
     headless: true,
   };
+  if (authenticate) c.authenticate = true;
   if (fromDate.trim()) c.fromDate = fromDate.trim();
   if (toDate.trim()) c.toDate = toDate.trim();
   const fh = parseHourField(fromHour);
@@ -60,6 +64,7 @@ export function App() {
     modalsOpened: number;
     modalsSkipped: number;
   } | null>(null);
+  const [authenticate, setAuthenticate] = useState(false);
 
   const onWs = useCallback((ev: WsClientEvent) => {
     if (ev.type === 'LOG') {
@@ -76,6 +81,26 @@ export function App() {
     }
     if (ev.type === 'SID_TEST_FOUND') {
       setEntries((prev) => upsertSidEntry(prev, ev.sid, ev.discoveredViaTestCode, ev.discoveredViaStatus, ev.tests));
+      return;
+    }
+    if (ev.type === 'SID_AUTH_DECISION') {
+      setEntries((prev) => {
+        const i = prev.findIndex((e) => e.sid === ev.sid);
+        if (i === -1) return prev;
+        const row = prev[i]!;
+        const authByCode = { ...row.authByCode, [ev.testCode]: {
+          decision: ev.decision,
+          reason: ev.reason,
+          applied: ev.applied,
+          saveClicked: ev.saveClicked,
+          writeMode: ev.writeMode,
+          ageMonths: ev.ageMonths,
+          sex: ev.sex,
+        } };
+        const out = prev.slice();
+        out[i] = { ...row, authByCode };
+        return out;
+      });
       return;
     }
     if (ev.type === 'SID_SKIPPED') {
@@ -114,11 +139,16 @@ export function App() {
         firstSeenViaTestCode: discoveredViaTestCode,
         firstSeenViaStatus: discoveredViaStatus,
         testsByCode: {},
+        authByCode: {},
       };
       for (const t of tests) next.testsByCode[t.testCode] = t;
       return [...prev, next];
     }
-    const merged: SidEntry = { ...prev[idx]!, testsByCode: { ...prev[idx]!.testsByCode } };
+    const merged: SidEntry = {
+      ...prev[idx]!,
+      testsByCode: { ...prev[idx]!.testsByCode },
+      authByCode: { ...(prev[idx]!.authByCode ?? {}) },
+    };
     for (const t of tests) merged.testsByCode[t.testCode] = t;
     const out = prev.slice();
     out[idx] = merged;
@@ -147,7 +177,7 @@ export function App() {
   const onStart = async () => {
     setErr(null);
     const testCodes = selectedTestCodesInOrder(enabled);
-    const config = buildRunConfig(testCodes, bu, statusSelection, fromDate, toDate, fromHour, toHour);
+    const config = buildRunConfig(testCodes, bu, statusSelection, fromDate, toDate, fromHour, toHour, authenticate);
     try {
       const r = await postRun(config);
       setLastRunId(r.runId);
@@ -188,6 +218,25 @@ export function App() {
               enabled={enabled}
               onChange={(id, v) => setEnabled((e) => ({ ...e, [id]: v }))}
             />
+            <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-amber-900/40 bg-zinc-950/50 px-4 py-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="authenticate" className="text-sm text-zinc-100">
+                  Authenticate (write mode)
+                </Label>
+                <p className="text-xs text-zinc-500">
+                  When on, the bot may tick B12 auth, append a high-result comment, and click Save. Default: dry
+                  run (decisions only).
+                </p>
+                {authenticate ? (
+                  <p className="text-xs text-amber-500/90">This modifies live LIS data. Use a test run first.</p>
+                ) : null}
+              </div>
+              <Switch
+                id="authenticate"
+                checked={authenticate}
+                onCheckedChange={(v: boolean) => setAuthenticate(v)}
+              />
+            </div>
             <div className="pt-4">
               <RunControls
                 running={running}

@@ -1,4 +1,4 @@
-import type { TestCodeId, WorksheetTestHit } from '@stellar/shared';
+import type { SidAuthRecord, TestCodeId, WorksheetTestHit } from '@stellar/shared';
 import { TEST_CODE_LABELS } from '@stellar/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,8 @@ export type SidEntry = {
   firstSeenViaTestCode: TestCodeId;
   firstSeenViaStatus: string;
   testsByCode: Partial<Record<TestCodeId, WorksheetTestHit>>;
+  /** B12 (BI235) auth workflow outcome from `SID_AUTH_DECISION`. */
+  authByCode?: Partial<Record<TestCodeId, SidAuthRecord>>;
 };
 
 export type SidGridProps = {
@@ -19,28 +21,28 @@ export type SidGridProps = {
   className?: string;
 };
 
-function dotClass(hit: WorksheetTestHit | undefined): string {
-  if (!hit) return 'bg-zinc-700';
+/** A row from the modal counts as present if we have a hit object, even with empty `value` (e.g. not yet reported). */
+function hasModalHit(hit: WorksheetTestHit | undefined): boolean {
+  return hit != null;
+}
+
+function valueDisplayText(hit: WorksheetTestHit): string {
+  const v = hit.value;
+  if (v == null) return '—';
+  const t = String(v).trim();
+  return t === '' ? '—' : t;
+}
+
+function dotClass(hit: WorksheetTestHit): string {
   if (hit.borderColor === 'red' || hit.abnormal === true) return 'bg-red-500';
   if (hit.borderColor === 'green' || hit.abnormal === false) return 'bg-emerald-500';
   return 'bg-zinc-500';
 }
 
-function TestPill({ code, hit }: { code: TestCodeId; hit: WorksheetTestHit | undefined }) {
+/** Renders a test the modal actually returned a row for (value may still be empty). */
+function TestPill({ code, hit }: { code: TestCodeId; hit: WorksheetTestHit }) {
   const label = TEST_CODE_LABELS[code];
-  if (!hit) {
-    return (
-      <span
-        className="inline-flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-2 py-1 text-xs text-zinc-500"
-        title={`${label} (${code}) — not present in this SID's worksheet`}
-      >
-        <span className={cn('h-2 w-2 rounded-full', dotClass(undefined))} />
-        <span>{label}</span>
-        <span className="font-mono text-zinc-600">{code}</span>
-        <span className="text-zinc-600">—</span>
-      </span>
-    );
-  }
+  const hasValue = hit.value != null && String(hit.value).trim() !== '';
   return (
     <span
       className="inline-flex items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/60 px-2 py-1 text-xs text-zinc-200"
@@ -50,8 +52,10 @@ function TestPill({ code, hit }: { code: TestCodeId; hit: WorksheetTestHit | und
       <span className="font-medium text-zinc-100">{label}</span>
       <span className="font-mono text-zinc-500">{code}</span>
       <span className="text-zinc-500">·</span>
-      <span className="font-mono tabular-nums text-amber-300">
-        {hit.value ?? '—'}
+      <span
+        className={cn('font-mono tabular-nums', hasValue ? 'text-amber-300' : 'text-zinc-500')}
+      >
+        {valueDisplayText(hit)}
         {hit.unit ? <span className="ml-1 text-zinc-400">{hit.unit}</span> : null}
       </span>
       {hit.authorized ? (
@@ -61,6 +65,102 @@ function TestPill({ code, hit }: { code: TestCodeId; hit: WorksheetTestHit | und
       ) : null}
     </span>
   );
+}
+
+function AuthWorkflowBadge({ code, r }: { code: TestCodeId; r: SidAuthRecord }) {
+  const t = r.reason;
+  const label = TEST_CODE_LABELS[code];
+  if (r.decision === 'already-authed') {
+    return (
+      <span
+        className="inline-flex rounded border border-emerald-800 bg-emerald-950/50 px-1.5 py-0.5 text-[10px] text-emerald-200"
+        title={t}
+      >
+        {label} · prior AUTH
+      </span>
+    );
+  }
+  if (r.decision === 'defer') {
+    return (
+      <span
+        className="inline-flex rounded border border-sky-800 bg-sky-950/50 px-1.5 py-0.5 text-[10px] text-sky-200"
+        title={t}
+      >
+        {label} · PENDING
+      </span>
+    );
+  }
+  if (r.decision === 'skip') {
+    return (
+      <span
+        className="inline-flex rounded border border-zinc-700 bg-zinc-900/50 px-1.5 py-0.5 text-[10px] text-zinc-400"
+        title={t}
+      >
+        {label} · REVIEW
+      </span>
+    );
+  }
+  if (r.decision === 'auth') {
+    if (!r.writeMode) {
+      return (
+        <span
+          className="inline-flex rounded border border-dashed border-emerald-500/50 px-1.5 py-0.5 text-[10px] text-emerald-300/80"
+          title={t}
+        >
+          {label} · would AUTH
+        </span>
+      );
+    }
+    if (r.applied) {
+      return (
+        <span
+          className="inline-flex rounded border border-emerald-700 bg-emerald-900/50 px-1.5 py-0.5 text-[10px] text-emerald-200"
+          title={t + (r.saveClicked ? ' · saved' : '')}
+        >
+          {label} · AUTH{!r.saveClicked ? ' (no save)' : ''}
+        </span>
+      );
+    }
+    return (
+      <span
+        className="inline-flex rounded border border-red-900/60 bg-red-950/30 px-1.5 py-0.5 text-[10px] text-red-300"
+        title={t}
+      >
+        {label} · AUTH failed
+      </span>
+    );
+  }
+  if (r.decision === 'high-comment') {
+    if (!r.writeMode) {
+      return (
+        <span
+          className="inline-flex rounded border border-dashed border-amber-500/50 px-1.5 py-0.5 text-[10px] text-amber-200/80"
+          title={t}
+        >
+          {label} · would HIGH+cmt
+        </span>
+      );
+    }
+    if (r.applied) {
+      return (
+        <span
+          className="inline-flex rounded border border-amber-800 bg-amber-950/50 px-1.5 py-0.5 text-[10px] text-amber-200"
+          title={t + (r.saveClicked ? ' · saved' : ' · comment line already present or no save needed')}
+        >
+          {label} · HIGH +cmt
+        </span>
+      );
+    }
+    return (
+      <span
+        className="inline-flex rounded border border-red-900/60 bg-red-950/30 px-1.5 py-0.5 text-[10px] text-red-300"
+        title={t}
+      >
+        {label} · comment failed
+      </span>
+    );
+  }
+  return null;
 }
 
 export function SidGrid({ entries, skippedDedup, summary, className }: SidGridProps) {
@@ -107,10 +207,21 @@ export function SidGrid({ entries, skippedDedup, summary, className }: SidGridPr
                   via {e.firstSeenViaTestCode} · {e.firstSeenViaStatus}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {TEST_CODE_ORDER.map((code) => (
-                  <TestPill key={code} code={code} hit={e.testsByCode[code]} />
-                ))}
+              <div className="flex min-h-[1.75rem] flex-col items-stretch gap-1.5 sm:items-end">
+                <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+                  {TEST_CODE_ORDER.filter((code) => hasModalHit(e.testsByCode[code])).map((code) => (
+                    <TestPill key={code} code={code} hit={e.testsByCode[code]!} />
+                  ))}
+                </div>
+                {e.authByCode && Object.keys(e.authByCode).length > 0 ? (
+                  <div className="flex flex-wrap justify-end gap-1">
+                    {(Object.entries(e.authByCode) as [TestCodeId, SidAuthRecord][])
+                      .filter(([, rec]) => rec)
+                      .map(([code, rec]) => (
+                        <AuthWorkflowBadge key={`auth-${code}`} code={code} r={rec} />
+                      ))}
+                  </div>
+                ) : null}
               </div>
             </li>
           ))}

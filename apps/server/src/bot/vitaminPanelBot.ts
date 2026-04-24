@@ -1,4 +1,4 @@
-import type { RunConfig, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
+import type { B12AuthKind, RunConfig, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
 import type { Browser } from 'puppeteer';
 import {
   applyChromiumExecutablePathEnv,
@@ -28,6 +28,15 @@ import {
   type WorksheetRow,
 } from './lis/sidWorksheet.js';
 import { matchTestCode } from '../config/testCodeMatchers.js';
+import { b12NamePatternSources, decideB12, HIGH_COMMENT, parseAgeSex } from '../config/authRules.js';
+import { B12 } from '../config/testCodes.js';
+import {
+  clickSaveAndSettle,
+  ensureSampleComment,
+  isB12RowAlreadyAuthed,
+  readPatientAgeSex,
+  tickB12RowAuth,
+} from './lis/auth.js';
 
 const MAX_GRID_PAGES = 500;
 
@@ -147,6 +156,7 @@ export async function runVitaminPanelScan(options: {
     const enabledCodes = new Set<TestCodeId>(config.testCodes);
     /** sid -> set of test codes already confirmed via the SID's worksheet modal. */
     const seenSids = new Map<string, Set<TestCodeId>>();
+    const b12NamePatterns = b12NamePatternSources();
     let modalsOpened = 0;
     let modalsSkipped = 0;
 
@@ -206,16 +216,79 @@ export async function runVitaminPanelScan(options: {
               const deduped = mergeTestsByCode(tests);
               const acc = seenSids.get(sid) ?? new Set<TestCodeId>();
               for (const t of deduped) acc.add(t.testCode);
-              seenSids.set(sid, acc);
-              modalsOpened += 1;
-              emit?.({
-                type: 'SID_TEST_FOUND',
-                runId,
-                sid,
-                discoveredViaTestCode: code,
-                discoveredViaStatus: status,
-                tests: deduped,
-              });
+
+              const b12Hit = deduped.find((t) => t.testCode === B12);
+              if (enabledCodes.has(B12) && b12Hit) {
+                const writeMode = config.authenticate === true;
+                const ageText = await readPatientAgeSex(page);
+                const { ageMonths, sex } = parseAgeSex(ageText);
+                const alreadyAuthed = await isB12RowAlreadyAuthed(page, b12NamePatterns);
+                let decision: B12AuthKind;
+                let reason: string;
+                if (alreadyAuthed) {
+                  decision = 'already-authed';
+                  reason = 'B12 row already authenticated in LIS';
+                } else {
+                  const d = decideB12(b12Hit.value, ageMonths);
+                  reason = d.reason;
+                  if (d.kind === 'auth') decision = 'auth';
+                  else if (d.kind === 'high-comment') decision = 'high-comment';
+                  else if (d.kind === 'defer') decision = 'defer';
+                  else decision = 'skip';
+                }
+                let applied = false;
+                let saveClicked = false;
+                if (writeMode && !alreadyAuthed) {
+                  if (decision === 'auth') {
+                    applied = await tickB12RowAuth(page, b12NamePatterns);
+                    if (applied) saveClicked = await clickSaveAndSettle(page);
+                  } else if (decision === 'high-comment') {
+                    const r = await ensureSampleComment(page, HIGH_COMMENT);
+                    if (r === 'already') {
+                      applied = true;
+                      saveClicked = false;
+                    } else if (r === 'appended' || r === 'set') {
+                      applied = true;
+                      saveClicked = await clickSaveAndSettle(page);
+                    }
+                  }
+                }
+                if (decision === 'defer') acc.delete(B12);
+                seenSids.set(sid, acc);
+                modalsOpened += 1;
+                emit?.({
+                  type: 'SID_TEST_FOUND',
+                  runId,
+                  sid,
+                  discoveredViaTestCode: code,
+                  discoveredViaStatus: status,
+                  tests: deduped,
+                });
+                emit?.({
+                  type: 'SID_AUTH_DECISION',
+                  runId,
+                  sid,
+                  testCode: B12,
+                  decision,
+                  reason,
+                  ageMonths,
+                  sex,
+                  writeMode,
+                  applied,
+                  saveClicked,
+                });
+              } else {
+                seenSids.set(sid, acc);
+                modalsOpened += 1;
+                emit?.({
+                  type: 'SID_TEST_FOUND',
+                  runId,
+                  sid,
+                  discoveredViaTestCode: code,
+                  discoveredViaStatus: status,
+                  tests: deduped,
+                });
+              }
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);
               log(emit, 'warn', `SID ${sid}: modal open/extract failed: ${msg}`);

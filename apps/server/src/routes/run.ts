@@ -49,6 +49,7 @@ function validateRunConfig(body: unknown): { ok: true; config: RunConfig } | { o
   const fromHour = parseHour(b.fromHour);
   const toHour = parseHour(b.toHour);
   const headless = b.headless === false ? false : true;
+  const authenticate = b.authenticate === true;
 
   const config: RunConfig = {
     testCodes: codes,
@@ -59,6 +60,7 @@ function validateRunConfig(body: unknown): { ok: true; config: RunConfig } | { o
     fromHour,
     toHour,
     headless,
+    authenticate,
     credentials: { username, password },
     loginUrls: {
       primary: process.env.LIS_PRIMARY_URL,

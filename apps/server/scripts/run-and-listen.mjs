@@ -69,6 +69,13 @@ ws.on('message', (raw) => {
     return;
   }
 
+  if (ev.type === 'SID_AUTH_DECISION') {
+    console.log(
+      `[AUTH] sid=${ev.sid} ${ev.testCode} decision=${ev.decision} writeMode=${ev.writeMode} applied=${ev.applied} save=${ev.saveClicked} ageMo=${ev.ageMonths ?? 'n/a'} reason=${ev.reason}`
+    );
+    return;
+  }
+
   if (ev.type === 'LOG') {
     console.log(`[LOG ${ev.level}] ${ev.message}`);
     return;

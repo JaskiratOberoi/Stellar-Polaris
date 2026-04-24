@@ -18,6 +18,12 @@ export interface RunConfig {
   toHour?: number | null;
   headless?: boolean;
   /**
+   * When true, the server may tick row auth checkboxes, append high-result
+   * comments, and click Save. Default `false` (dry run): only evaluates rules
+   * and emits `SID_AUTH_DECISION` with `applied=false`, no DOM writes.
+   */
+  authenticate?: boolean;
+  /**
    * Set only on the server from `.env` (never from the web UI). Same chain as CBC: `CBC_LOGIN_*` → `LOGIN_*` → `LIS_*` → defaults.
    */
   credentials?: {
@@ -45,6 +51,21 @@ export interface WorksheetTestHit {
   /** Computed border colour of the value textarea: red = out of range, green = normal. */
   borderColor: 'red' | 'green' | 'other' | null;
 }
+
+/** B12 (BI235) / future tests: per-SID LIS auth workflow outcome. */
+export type B12AuthKind = 'auth' | 'high-comment' | 'defer' | 'skip' | 'already-authed';
+
+export type SidAuthRecord = {
+  decision: B12AuthKind;
+  reason: string;
+  /** True when a write-mode action (tick, comment) succeeded. */
+  applied: boolean;
+  saveClicked: boolean;
+  /** Mirrors `RunConfig.authenticate` for the run. */
+  writeMode: boolean;
+  ageMonths: number | null;
+  sex: 'M' | 'F' | null;
+};
 
 export type WsClientEvent =
   | { type: 'LOG'; level: 'info' | 'warn' | 'error'; message: string; ts: number }
@@ -76,6 +97,19 @@ export type WsClientEvent =
       uniqueSids: number;
       modalsOpened: number;
       modalsSkipped: number;
+    }
+  | {
+      type: 'SID_AUTH_DECISION';
+      runId: string;
+      sid: string;
+      testCode: TestCodeId;
+      decision: B12AuthKind;
+      reason: string;
+      ageMonths: number | null;
+      sex: 'M' | 'F' | null;
+      writeMode: boolean;
+      applied: boolean;
+      saveClicked: boolean;
     }
   | { type: 'RUN_DONE'; runId: string }
   | { type: 'RUN_ERROR'; runId: string; error: string }

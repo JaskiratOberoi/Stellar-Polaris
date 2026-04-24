@@ -1,6 +1,6 @@
 # Stellar Polaris
 
-Electron-ready LIS automation stack: Node + Puppeteer server, React + Vite UI. This slice lists SIDs from the sample worksheet grid for Vitamin B12 (`BI235`) and Vitamin D (`BI005`) per selected filters.
+Electron-ready LIS automation stack: Node + Puppeteer server, React + Vite UI. This slice lists SIDs from the sample worksheet grid and extracts per-test values from the SID modal for Vitamin B12 (`BI235`), Vitamin D (`BI005`), and Total IgE (`BI133`) per selected filters.
 
 ## Prereqs
 

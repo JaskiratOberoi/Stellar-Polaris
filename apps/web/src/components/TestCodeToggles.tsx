@@ -4,7 +4,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 
-const ORDER: TestCodeId[] = ['BI235', 'BI005'];
+const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133'];
 
 export function TestCodeToggles(props: {
   enabled: Record<TestCodeId, boolean>;

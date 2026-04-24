@@ -1,13 +1,14 @@
 /** Test code toggle keys used in the UI and bot. */
-export type TestCodeId = 'BI235' | 'BI005';
+export type TestCodeId = 'BI235' | 'BI005' | 'BI133';
 
 export const TEST_CODE_LABELS: Record<TestCodeId, string> = {
   BI235: 'Vitamin B12',
   BI005: 'Vitamin D',
+  BI133: 'Total IgE',
 };
 
 export interface RunConfig {
-  /** Which test codes to scan, in order (e.g. BI235 then BI005). */
+  /** Which test codes to scan, in order (e.g. BI235 then BI005 then BI133). */
   testCodes: TestCodeId[];
   businessUnit: string;
   statusLabels: string[];

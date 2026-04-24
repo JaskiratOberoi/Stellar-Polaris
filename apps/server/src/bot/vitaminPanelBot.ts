@@ -44,6 +44,24 @@ function rowToHit(row: WorksheetRow, testCode: TestCodeId): WorksheetTestHit {
   };
 }
 
+/** LIS sometimes emits two rows that match the same test (e.g. link + value); keep one hit per code. */
+function mergeTestsByCode(hits: WorksheetTestHit[]): WorksheetTestHit[] {
+  const by = new Map<TestCodeId, WorksheetTestHit>();
+  const hasValue = (h: WorksheetTestHit) => {
+    const v = h.value;
+    return v != null && String(v).trim() !== '';
+  };
+  for (const h of hits) {
+    const prev = by.get(h.testCode);
+    if (!prev) {
+      by.set(h.testCode, h);
+      continue;
+    }
+    if (hasValue(h) && !hasValue(prev)) by.set(h.testCode, h);
+  }
+  return [...by.values()];
+}
+
 export type EmitFn = (ev: WsClientEvent) => void;
 
 function log(emit: EmitFn | undefined, level: 'info' | 'warn' | 'error', message: string) {
@@ -185,8 +203,9 @@ export async function runVitaminPanelScan(options: {
                   tests.push(rowToHit(row, matched));
                 }
               }
+              const deduped = mergeTestsByCode(tests);
               const acc = seenSids.get(sid) ?? new Set<TestCodeId>();
-              for (const t of tests) acc.add(t.testCode);
+              for (const t of deduped) acc.add(t.testCode);
               seenSids.set(sid, acc);
               modalsOpened += 1;
               emit?.({
@@ -195,7 +214,7 @@ export async function runVitaminPanelScan(options: {
                 sid,
                 discoveredViaTestCode: code,
                 discoveredViaStatus: status,
-                tests,
+                tests: deduped,
               });
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);

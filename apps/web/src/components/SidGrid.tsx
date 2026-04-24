@@ -3,7 +3,7 @@ import { TEST_CODE_LABELS } from '@stellar/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
-const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005'];
+const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133'];
 
 export type SidEntry = {
   sid: string;

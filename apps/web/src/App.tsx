@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { RunConfig, TestCodeId, WsClientEvent } from '@stellar/shared';
+import type { RunConfig, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
 import { atLeastOneTestCodeOn, selectedTestCodesInOrder, TestCodeToggles } from './components/TestCodeToggles';
 import { FiltersPanel } from './components/FiltersPanel';
 import { RunControls } from './components/RunControls';
-import { SidGrid, type SidRow } from './components/SidGrid';
+import { SidGrid, type SidEntry } from './components/SidGrid';
 import { getRunStatus, postRun, postStop } from './lib/api';
 import { connectRunWebSocket } from './lib/wsClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
@@ -50,10 +50,16 @@ export function App() {
   const [fromHour, setFromHour] = useState('');
   const [toHour, setToHour] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
-  const [rows, setRows] = useState<SidRow[]>([]);
+  const [entries, setEntries] = useState<SidEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [skippedDedup, setSkippedDedup] = useState(0);
+  const [summary, setSummary] = useState<{
+    uniqueSids: number;
+    modalsOpened: number;
+    modalsSkipped: number;
+  } | null>(null);
 
   const onWs = useCallback((ev: WsClientEvent) => {
     if (ev.type === 'LOG') {
@@ -63,13 +69,24 @@ export function App() {
     if (ev.type === 'RUN_STARTED') {
       setRunning(true);
       setLastRunId(ev.runId);
-      setRows([]);
+      setEntries([]);
+      setSkippedDedup(0);
+      setSummary(null);
       return;
     }
-    if (ev.type === 'SID_FOUND') {
-      setRows((prev) => {
-        if (ev.testCode !== 'BI235' && ev.testCode !== 'BI005') return prev;
-        return [...prev, { testCode: ev.testCode, status: ev.status, sid: ev.sid }];
+    if (ev.type === 'SID_TEST_FOUND') {
+      setEntries((prev) => upsertSidEntry(prev, ev.sid, ev.discoveredViaTestCode, ev.discoveredViaStatus, ev.tests));
+      return;
+    }
+    if (ev.type === 'SID_SKIPPED') {
+      setSkippedDedup((n) => n + 1);
+      return;
+    }
+    if (ev.type === 'RUN_SUMMARY') {
+      setSummary({
+        uniqueSids: ev.uniqueSids,
+        modalsOpened: ev.modalsOpened,
+        modalsSkipped: ev.modalsSkipped,
       });
       return;
     }
@@ -82,6 +99,31 @@ export function App() {
       }
     }
   }, []);
+
+  function upsertSidEntry(
+    prev: SidEntry[],
+    sid: string,
+    discoveredViaTestCode: TestCodeId,
+    discoveredViaStatus: string,
+    tests: WorksheetTestHit[]
+  ): SidEntry[] {
+    const idx = prev.findIndex((e) => e.sid === sid);
+    if (idx === -1) {
+      const next: SidEntry = {
+        sid,
+        firstSeenViaTestCode: discoveredViaTestCode,
+        firstSeenViaStatus: discoveredViaStatus,
+        testsByCode: {},
+      };
+      for (const t of tests) next.testsByCode[t.testCode] = t;
+      return [...prev, next];
+    }
+    const merged: SidEntry = { ...prev[idx]!, testsByCode: { ...prev[idx]!.testsByCode } };
+    for (const t of tests) merged.testsByCode[t.testCode] = t;
+    const out = prev.slice();
+    out[idx] = merged;
+    return out;
+  }
 
   useEffect(() => {
     return connectRunWebSocket(onWs);
@@ -170,7 +212,7 @@ export function App() {
           onToHour={setToHour}
         />
 
-        <SidGrid rows={rows} />
+        <SidGrid entries={entries} skippedDedup={skippedDedup} summary={summary} />
 
         <Card>
           <CardHeader>

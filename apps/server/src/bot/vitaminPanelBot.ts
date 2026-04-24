@@ -1,4 +1,4 @@
-import type { RunConfig, WsClientEvent } from '@stellar/shared';
+import type { RunConfig, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
 import type { Browser } from 'puppeteer';
 import {
   applyChromiumExecutablePathEnv,
@@ -21,8 +21,28 @@ import {
   waitForSampleGridAfterSearch,
   waitForSampleGridPageTurn,
 } from './lis/navigation.js';
+import {
+  closeSidWorksheet,
+  extractSidWorksheet,
+  openSidWorksheet,
+  type WorksheetRow,
+} from './lis/sidWorksheet.js';
+import { matchTestCode } from '../config/testCodeMatchers.js';
 
 const MAX_GRID_PAGES = 500;
+
+function rowToHit(row: WorksheetRow, testCode: TestCodeId): WorksheetTestHit {
+  return {
+    testCode,
+    rawName: row.rawName,
+    value: row.value,
+    unit: row.unit,
+    abnormal: row.abnormal,
+    authorized: row.authorized,
+    normalRange: row.normalRange,
+    borderColor: row.borderColor,
+  };
+}
 
 export type EmitFn = (ev: WsClientEvent) => void;
 
@@ -106,6 +126,12 @@ export async function runVitaminPanelScan(options: {
       );
     }
 
+    const enabledCodes = new Set<TestCodeId>(config.testCodes);
+    /** sid -> set of test codes already confirmed via the SID's worksheet modal. */
+    const seenSids = new Map<string, Set<TestCodeId>>();
+    let modalsOpened = 0;
+    let modalsSkipped = 0;
+
     for (const code of config.testCodes) {
       if (signal.aborted) break;
       log(emit, 'info', `Setting test code: ${code}`);
@@ -125,14 +151,61 @@ export async function runVitaminPanelScan(options: {
           if (signal.aborted) break;
           const pagerBefore = await getSampleGridPagerInfo(page);
           const sids = await listSidsForCurrentPage(page);
-          log(emit, 'info', `TestCode ${code} / "${status}" page ${pageNo + 1}: ${sids.length} SID(s)`);
+          log(
+            emit,
+            'info',
+            `TestCode ${code} / "${status}" page ${pageNo + 1}: ${sids.length} SID(s)`
+          );
+
           for (const sid of sids) {
             if (signal.aborted) break;
-            emit?.({ type: 'SID_FOUND', runId, testCode: code, status, sid });
+            const known = seenSids.get(sid);
+            const fullyResolved = !!known && [...enabledCodes].every((c) => known.has(c));
+            if (fullyResolved) {
+              modalsSkipped += 1;
+              emit?.({
+                type: 'SID_SKIPPED',
+                runId,
+                sid,
+                discoveredViaTestCode: code,
+                discoveredViaStatus: status,
+                reason: 'already-resolved',
+              });
+              continue;
+            }
+
+            try {
+              await openSidWorksheet(page, sid);
+              const rows = await extractSidWorksheet(page);
+              const tests: WorksheetTestHit[] = [];
+              for (const row of rows) {
+                if (row.isPanelHeader) continue;
+                const matched = matchTestCode(row.rawName);
+                if (matched && enabledCodes.has(matched)) {
+                  tests.push(rowToHit(row, matched));
+                }
+              }
+              const acc = seenSids.get(sid) ?? new Set<TestCodeId>();
+              for (const t of tests) acc.add(t.testCode);
+              seenSids.set(sid, acc);
+              modalsOpened += 1;
+              emit?.({
+                type: 'SID_TEST_FOUND',
+                runId,
+                sid,
+                discoveredViaTestCode: code,
+                discoveredViaStatus: status,
+                tests,
+              });
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              log(emit, 'warn', `SID ${sid}: modal open/extract failed: ${msg}`);
+            } finally {
+              await closeSidWorksheet(page).catch(() => {});
+            }
           }
-          if (sids.length === 0) {
-            break;
-          }
+
+          if (sids.length === 0) break;
           const firstBefore = await firstSidOnSampleGrid(page);
           const next = await navigateToNextSampleGridPage(page);
           if (!next) {
@@ -147,6 +220,19 @@ export async function runVitaminPanelScan(options: {
         }
       }
     }
+
+    emit?.({
+      type: 'RUN_SUMMARY',
+      runId,
+      uniqueSids: seenSids.size,
+      modalsOpened,
+      modalsSkipped,
+    });
+    log(
+      emit,
+      'info',
+      `Run summary: ${seenSids.size} unique SID(s), ${modalsOpened} modal(s) opened, ${modalsSkipped} skipped via dedup.`
+    );
   } finally {
     if (browser) {
       try {

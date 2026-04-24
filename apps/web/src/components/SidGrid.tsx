@@ -1,50 +1,70 @@
-import type { TestCodeId } from '@stellar/shared';
+import type { TestCodeId, WorksheetTestHit } from '@stellar/shared';
 import { TEST_CODE_LABELS } from '@stellar/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
-export type SidRow = {
-  testCode: TestCodeId;
-  status: string;
-  sid: string;
-};
-
 const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005'];
 
-type SidGroup = {
+export type SidEntry = {
   sid: string;
-  /** key = `${testCode}|${status}` to dedupe duplicates from re-runs/pagination overlap */
-  hits: Map<string, { testCode: TestCodeId; status: string }>;
+  firstSeenViaTestCode: TestCodeId;
+  firstSeenViaStatus: string;
+  testsByCode: Partial<Record<TestCodeId, WorksheetTestHit>>;
 };
 
-function groupBySid(rows: SidRow[]): SidGroup[] {
-  const order: string[] = [];
-  const map = new Map<string, SidGroup>();
-  for (const r of rows) {
-    let g = map.get(r.sid);
-    if (!g) {
-      g = { sid: r.sid, hits: new Map() };
-      map.set(r.sid, g);
-      order.push(r.sid);
-    }
-    g.hits.set(`${r.testCode}|${r.status}`, { testCode: r.testCode, status: r.status });
+export type SidGridProps = {
+  entries: SidEntry[];
+  skippedDedup: number;
+  summary: { uniqueSids: number; modalsOpened: number; modalsSkipped: number } | null;
+  className?: string;
+};
+
+function dotClass(hit: WorksheetTestHit | undefined): string {
+  if (!hit) return 'bg-zinc-700';
+  if (hit.borderColor === 'red' || hit.abnormal === true) return 'bg-red-500';
+  if (hit.borderColor === 'green' || hit.abnormal === false) return 'bg-emerald-500';
+  return 'bg-zinc-500';
+}
+
+function TestPill({ code, hit }: { code: TestCodeId; hit: WorksheetTestHit | undefined }) {
+  const label = TEST_CODE_LABELS[code];
+  if (!hit) {
+    return (
+      <span
+        className="inline-flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-2 py-1 text-xs text-zinc-500"
+        title={`${label} (${code}) — not present in this SID's worksheet`}
+      >
+        <span className={cn('h-2 w-2 rounded-full', dotClass(undefined))} />
+        <span>{label}</span>
+        <span className="font-mono text-zinc-600">{code}</span>
+        <span className="text-zinc-600">—</span>
+      </span>
+    );
   }
-  return order.map((sid) => map.get(sid)!);
+  return (
+    <span
+      className="inline-flex items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/60 px-2 py-1 text-xs text-zinc-200"
+      title={hit.normalRange ? `Normal range: ${hit.normalRange}` : `${label} (${code})`}
+    >
+      <span className={cn('h-2 w-2 rounded-full', dotClass(hit))} />
+      <span className="font-medium text-zinc-100">{label}</span>
+      <span className="font-mono text-zinc-500">{code}</span>
+      <span className="text-zinc-500">·</span>
+      <span className="font-mono tabular-nums text-amber-300">
+        {hit.value ?? '—'}
+        {hit.unit ? <span className="ml-1 text-zinc-400">{hit.unit}</span> : null}
+      </span>
+      {hit.authorized ? (
+        <span className="ml-1 rounded bg-emerald-900/50 px-1.5 py-px text-[10px] uppercase tracking-wide text-emerald-300">
+          Auth
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
-function sortedHits(g: SidGroup): { testCode: TestCodeId; status: string }[] {
-  return [...g.hits.values()].sort((a, b) => {
-    const ai = TEST_CODE_ORDER.indexOf(a.testCode);
-    const bi = TEST_CODE_ORDER.indexOf(b.testCode);
-    if (ai !== bi) return ai - bi;
-    return a.status.localeCompare(b.status);
-  });
-}
-
-export function SidGrid(props: { rows: SidRow[]; className?: string }) {
-  const { rows, className } = props;
-
-  if (rows.length === 0) {
+export function SidGrid({ entries, skippedDedup, summary, className }: SidGridProps) {
+  if (entries.length === 0) {
     return (
       <Card className={cn('border-dashed border-zinc-700', className)}>
         <CardHeader>
@@ -57,39 +77,43 @@ export function SidGrid(props: { rows: SidRow[]; className?: string }) {
     );
   }
 
-  const groups = groupBySid(rows);
-
   return (
     <Card className={cn('border-zinc-800', className)}>
       <CardHeader className="pb-2">
         <CardTitle className="text-base">
-          Sample IDs <span className="text-sm font-normal text-zinc-500">({groups.length} unique)</span>
+          Sample IDs{' '}
+          <span className="text-sm font-normal text-zinc-500">
+            ({entries.length} unique
+            {skippedDedup > 0 ? `, ${skippedDedup} dedup-skipped` : ''})
+          </span>
         </CardTitle>
+        {summary ? (
+          <p className="text-xs text-zinc-500">
+            Run summary: {summary.uniqueSids} unique SID(s), {summary.modalsOpened} modal(s) opened,{' '}
+            {summary.modalsSkipped} skipped via dedup.
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent>
         <ul className="divide-y divide-zinc-800">
-          {groups.map((g) => {
-            const hits = sortedHits(g);
-            return (
-              <li key={g.sid} className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
-                <span className="font-mono text-sm text-amber-400/90 tabular-nums">{g.sid}</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {hits.map((h) => (
-                    <span
-                      key={`${h.testCode}|${h.status}`}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/60 px-2 py-0.5 text-xs text-zinc-300"
-                      title={`${TEST_CODE_LABELS[h.testCode]} (${h.testCode}) — ${h.status}`}
-                    >
-                      <span className="font-medium text-zinc-100">{TEST_CODE_LABELS[h.testCode]}</span>
-                      <span className="font-mono text-zinc-500">{h.testCode}</span>
-                      <span className="text-zinc-500">·</span>
-                      <span className="text-zinc-400">{h.status}</span>
-                    </span>
-                  ))}
-                </div>
-              </li>
-            );
-          })}
+          {entries.map((e) => (
+            <li
+              key={e.sid}
+              className="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex flex-col">
+                <span className="font-mono text-sm text-amber-400/90 tabular-nums">{e.sid}</span>
+                <span className="text-[11px] text-zinc-500">
+                  via {e.firstSeenViaTestCode} · {e.firstSeenViaStatus}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {TEST_CODE_ORDER.map((code) => (
+                  <TestPill key={code} code={code} hit={e.testsByCode[code]} />
+                ))}
+              </div>
+            </li>
+          ))}
         </ul>
       </CardContent>
     </Card>

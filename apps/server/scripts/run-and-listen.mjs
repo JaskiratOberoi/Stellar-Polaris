@@ -2,7 +2,7 @@
 import WebSocket from 'ws';
 
 const HOST = process.env.HOST || 'localhost:4400';
-const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 180000);
+const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 240000);
 
 const cfg = {
   testCodes: ['BI235', 'BI005'],
@@ -12,7 +12,8 @@ const cfg = {
 };
 
 const ws = new WebSocket(`ws://${HOST}/ws`);
-let sids = 0;
+let sidCount = 0;
+let skippedCount = 0;
 
 function done(code) {
   try { ws.close(); } catch {}
@@ -20,7 +21,7 @@ function done(code) {
 }
 
 const killer = setTimeout(() => {
-  console.error(`[smoke] Timed out after ${TIMEOUT_MS}ms (sids so far: ${sids}). Asking server to stop.`);
+  console.error(`[smoke] Timed out after ${TIMEOUT_MS}ms (sids so far: ${sidCount}). Asking server to stop.`);
   fetch(`http://${HOST}/api/stop`, { method: 'POST' }).catch(() => {});
   setTimeout(() => done(2), 4000);
 }, TIMEOUT_MS);
@@ -43,20 +44,41 @@ ws.on('open', async () => {
 ws.on('message', (raw) => {
   let ev;
   try { ev = JSON.parse(raw.toString('utf8')); } catch { return; }
-  if (ev.type === 'SID_FOUND') {
-    sids += 1;
-    console.log(`[SID #${sids}] code=${ev.testCode} status=${ev.statusLabel} sid=${ev.sid} page=${ev.page ?? '?'}`);
+
+  if (ev.type === 'SID_TEST_FOUND') {
+    sidCount += 1;
+    const summary = ev.tests.length === 0
+      ? 'no enabled tests in modal'
+      : ev.tests
+          .map((t) => `${t.testCode}=${t.value ?? 'null'}${t.unit ? ' ' + t.unit : ''}${t.abnormal ? ' [AB]' : ''}${t.borderColor ? ' (' + t.borderColor + ')' : ''}`)
+          .join(', ');
+    console.log(
+      `[SID #${sidCount}] sid=${ev.sid} via=${ev.discoveredViaTestCode}/${ev.discoveredViaStatus}: ${summary}`
+    );
     return;
   }
+
+  if (ev.type === 'SID_SKIPPED') {
+    skippedCount += 1;
+    console.log(`[SKIP] sid=${ev.sid} via=${ev.discoveredViaTestCode}/${ev.discoveredViaStatus} (${ev.reason})`);
+    return;
+  }
+
+  if (ev.type === 'RUN_SUMMARY') {
+    console.log(`[SUMMARY] uniqueSids=${ev.uniqueSids} modalsOpened=${ev.modalsOpened} modalsSkipped=${ev.modalsSkipped}`);
+    return;
+  }
+
   if (ev.type === 'LOG') {
     console.log(`[LOG ${ev.level}] ${ev.message}`);
     return;
   }
+
   console.log(`[EV ${ev.type}]`, JSON.stringify(ev));
   if (ev.type === 'RUN_DONE' || ev.type === 'RUN_ERROR' || ev.type === 'RUN_STOPPED') {
     clearTimeout(killer);
-    console.log(`[smoke] terminal=${ev.type} totalSids=${sids}`);
-    done(ev.type === 'RUN_DONE' && sids > 0 ? 0 : (ev.type === 'RUN_DONE' ? 0 : 3));
+    console.log(`[smoke] terminal=${ev.type} sidsEmitted=${sidCount} skipped=${skippedCount}`);
+    done(ev.type === 'RUN_DONE' ? 0 : 3);
   }
 });
 

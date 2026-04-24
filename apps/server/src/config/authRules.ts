@@ -1,4 +1,4 @@
-import { B12 } from './testCodes.js';
+import { B12, VITAMIN_D } from './testCodes.js';
 import { TEST_CODE_NAME_PATTERNS } from './testCodeMatchers.js';
 
 export const HIGH_COMMENT = 'Result Rechecked, kindly check with supplement history.';
@@ -12,6 +12,31 @@ export type B12Decision =
 /** Regex sources for BI235 row name matching inside `page.evaluate` (must match testCodeMatchers B12). */
 export function b12NamePatternSources(): string[] {
   return TEST_CODE_NAME_PATTERNS[B12].map((r) => r.source);
+}
+
+export type VitDDecision =
+  | { kind: 'auth'; reason: string }
+  | { kind: 'high-comment'; reason: string }
+  | { kind: 'defer'; reason: string }
+  | { kind: 'skip'; reason: string };
+
+/** BI005 row name patterns for `isRowAuthed` / `tickRowAuth` in the modal. */
+export function vitDNamePatternSources(): string[] {
+  return TEST_CODE_NAME_PATTERNS[VITAMIN_D].map((r) => r.source);
+}
+
+/** Unisex 5-100. Same outcome shape as B12 (no age in range — empty defers, below skips, over high-comment). */
+export function decideVitD(rawValue: string | null): VitDDecision {
+  const lower = 5;
+  const upper = 100;
+  const v = (rawValue ?? '').trim();
+  if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
+  if (/^>/.test(v)) return { kind: 'high-comment', reason: `value ${v} above scale` };
+  const n = Number(String(v).replace(/,/g, ''));
+  if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (n < lower) return { kind: 'skip', reason: `value ${n} < ${lower} (low, manual review)` };
+  if (n > upper) return { kind: 'high-comment', reason: `value ${n} > ${upper}` };
+  return { kind: 'auth', reason: `value ${n} within ${lower}-${upper}` };
 }
 
 /**

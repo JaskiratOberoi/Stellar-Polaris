@@ -7,7 +7,7 @@ export async function readPatientAgeSex(page: Page): Promise<string> {
   return (await h.evaluate((el) => (el as HTMLElement).textContent || '')) ?? '';
 }
 
-export async function isB12RowAlreadyAuthed(page: Page, patternSources: string[]): Promise<boolean> {
+export async function isRowAuthed(page: Page, patternSources: string[]): Promise<boolean> {
   return page.evaluate(
     (sources: string[]) => {
       const norm = (raw: string) =>
@@ -46,7 +46,7 @@ export async function isB12RowAlreadyAuthed(page: Page, patternSources: string[]
   );
 }
 
-export async function tickB12RowAuth(page: Page, patternSources: string[]): Promise<boolean> {
+export async function tickRowAuth(page: Page, patternSources: string[]): Promise<boolean> {
   return page.evaluate(
     (sources: string[]) => {
       const norm = (raw: string) =>

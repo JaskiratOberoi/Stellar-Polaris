@@ -29,11 +29,11 @@ pnpm dev
 
 Open `http://localhost:5173`.
 
-### B12 (BI235) authentication
+### B12 (BI235) and Vitamin D (BI005) authentication
 
-The UI has **Authenticate (write mode)** (default: off). When off, the server still reads patient age from the modal, applies the B12 reference rules, and streams `SID_AUTH_DECISION` over the WebSocket with `writeMode: false` — **no** checkbox clicks, sample comments, or Save.
+The UI has **Authenticate (write mode)** (default: off). When off, the server still reads the modal, applies the B12 age-banded and Vit D unisex (5–100) reference rules, and streams `SID_AUTH_DECISION` per test code with `writeMode: false` — **no** checkbox clicks, sample comments, or Save.
 
-When the toggle is on, `RunConfig.authenticate` is set and the bot may tick the B12 row `chkAuth` (in-range), append the high-result line to the sample **Comments** textarea, and click **Save**. This **changes live LIS data** — use dry runs first.
+When the toggle is on, the bot may tick the matching row `chkAuth` (in-range values), append the shared high-result line to the sample **Comments** textarea (at most once if both B12 and Vit D are out of range in the same SID), then click **Save once** so both rows persist. This **changes live LIS data** — use dry runs first.
 
 `POST /api/run` may include `"authenticate": true` to mirror the UI (JSON body).
 

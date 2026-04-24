@@ -28,14 +28,21 @@ import {
   type WorksheetRow,
 } from './lis/sidWorksheet.js';
 import { matchTestCode } from '../config/testCodeMatchers.js';
-import { b12NamePatternSources, decideB12, HIGH_COMMENT, parseAgeSex } from '../config/authRules.js';
-import { B12 } from '../config/testCodes.js';
+import {
+  b12NamePatternSources,
+  decideB12,
+  decideVitD,
+  HIGH_COMMENT,
+  parseAgeSex,
+  vitDNamePatternSources,
+} from '../config/authRules.js';
+import { B12, VITAMIN_D } from '../config/testCodes.js';
 import {
   clickSaveAndSettle,
   ensureSampleComment,
-  isB12RowAlreadyAuthed,
+  isRowAuthed,
   readPatientAgeSex,
-  tickB12RowAuth,
+  tickRowAuth,
 } from './lis/auth.js';
 
 const MAX_GRID_PAGES = 500;
@@ -69,6 +76,13 @@ function mergeTestsByCode(hits: WorksheetTestHit[]): WorksheetTestHit[] {
     if (hasValue(h) && !hasValue(prev)) by.set(h.testCode, h);
   }
   return [...by.values()];
+}
+
+function planKindToAuth(d: { kind: 'auth' | 'high-comment' | 'defer' | 'skip' }): B12AuthKind {
+  if (d.kind === 'auth') return 'auth';
+  if (d.kind === 'high-comment') return 'high-comment';
+  if (d.kind === 'defer') return 'defer';
+  return 'skip';
 }
 
 export type EmitFn = (ev: WsClientEvent) => void;
@@ -157,6 +171,7 @@ export async function runVitaminPanelScan(options: {
     /** sid -> set of test codes already confirmed via the SID's worksheet modal. */
     const seenSids = new Map<string, Set<TestCodeId>>();
     const b12NamePatterns = b12NamePatternSources();
+    const vitDNamePatterns = vitDNamePatternSources();
     let modalsOpened = 0;
     let modalsSkipped = 0;
 
@@ -217,76 +232,109 @@ export async function runVitaminPanelScan(options: {
               const acc = seenSids.get(sid) ?? new Set<TestCodeId>();
               for (const t of deduped) acc.add(t.testCode);
 
-              const b12Hit = deduped.find((t) => t.testCode === B12);
-              if (enabledCodes.has(B12) && b12Hit) {
-                const writeMode = config.authenticate === true;
+              const needB12Auth = enabledCodes.has(B12) && deduped.some((t) => t.testCode === B12);
+              const needVitDAuth = enabledCodes.has(VITAMIN_D) && deduped.some((t) => t.testCode === VITAMIN_D);
+
+              type AuthEval = { testCode: TestCodeId; decision: B12AuthKind; reason: string };
+              const evals: AuthEval[] = [];
+              let ageMonths: number | null = null;
+              let sex: 'M' | 'F' | null = null;
+              if (needB12Auth || needVitDAuth) {
                 const ageText = await readPatientAgeSex(page);
-                const { ageMonths, sex } = parseAgeSex(ageText);
-                const alreadyAuthed = await isB12RowAlreadyAuthed(page, b12NamePatterns);
-                let decision: B12AuthKind;
-                let reason: string;
-                if (alreadyAuthed) {
-                  decision = 'already-authed';
-                  reason = 'B12 row already authenticated in LIS';
+                const parsed = parseAgeSex(ageText);
+                ageMonths = parsed.ageMonths;
+                sex = parsed.sex;
+              }
+              if (needB12Auth) {
+                const b12Hit = deduped.find((t) => t.testCode === B12)!;
+                if (await isRowAuthed(page, b12NamePatterns)) {
+                  evals.push({
+                    testCode: B12,
+                    decision: 'already-authed',
+                    reason: 'B12 row already authenticated in LIS',
+                  });
                 } else {
                   const d = decideB12(b12Hit.value, ageMonths);
-                  reason = d.reason;
-                  if (d.kind === 'auth') decision = 'auth';
-                  else if (d.kind === 'high-comment') decision = 'high-comment';
-                  else if (d.kind === 'defer') decision = 'defer';
-                  else decision = 'skip';
+                  evals.push({ testCode: B12, decision: planKindToAuth(d), reason: d.reason });
                 }
-                let applied = false;
-                let saveClicked = false;
-                if (writeMode && !alreadyAuthed) {
-                  if (decision === 'auth') {
-                    applied = await tickB12RowAuth(page, b12NamePatterns);
-                    if (applied) saveClicked = await clickSaveAndSettle(page);
-                  } else if (decision === 'high-comment') {
-                    const r = await ensureSampleComment(page, HIGH_COMMENT);
-                    if (r === 'already') {
-                      applied = true;
-                      saveClicked = false;
-                    } else if (r === 'appended' || r === 'set') {
-                      applied = true;
-                      saveClicked = await clickSaveAndSettle(page);
-                    }
+              }
+              if (needVitDAuth) {
+                const vitDHit = deduped.find((t) => t.testCode === VITAMIN_D)!;
+                if (await isRowAuthed(page, vitDNamePatterns)) {
+                  evals.push({
+                    testCode: VITAMIN_D,
+                    decision: 'already-authed',
+                    reason: 'Vitamin D row already authenticated in LIS',
+                  });
+                } else {
+                  const d = decideVitD(vitDHit.value);
+                  const decision = planKindToAuth(d);
+                  evals.push({ testCode: VITAMIN_D, decision, reason: d.reason });
+                  if (decision === 'high-comment' || decision === 'skip') {
+                    log(emit, 'warn', `SID ${sid} Vit D (BI005): ${decision} — ${d.reason} (manual review)`);
                   }
                 }
-                if (decision === 'defer') acc.delete(B12);
-                seenSids.set(sid, acc);
-                modalsOpened += 1;
-                emit?.({
-                  type: 'SID_TEST_FOUND',
-                  runId,
-                  sid,
-                  discoveredViaTestCode: code,
-                  discoveredViaStatus: status,
-                  tests: deduped,
-                });
+              }
+              for (const e of evals) {
+                if (e.decision === 'defer') acc.delete(e.testCode);
+              }
+              seenSids.set(sid, acc);
+              modalsOpened += 1;
+              emit?.({
+                type: 'SID_TEST_FOUND',
+                runId,
+                sid,
+                discoveredViaTestCode: code,
+                discoveredViaStatus: status,
+                tests: deduped,
+              });
+
+              const writeMode = config.authenticate === true;
+              const applied = new Map<TestCodeId, boolean>();
+              let savePending = false;
+              if (writeMode && evals.length > 0) {
+                for (const e of evals) {
+                  if (e.decision === 'already-authed') {
+                    applied.set(e.testCode, false);
+                    continue;
+                  }
+                  if (e.decision === 'auth') {
+                    const pats = e.testCode === B12 ? b12NamePatterns : vitDNamePatterns;
+                    const ok = await tickRowAuth(page, pats);
+                    applied.set(e.testCode, ok);
+                    if (ok) savePending = true;
+                  } else if (e.decision === 'high-comment') {
+                    const r = await ensureSampleComment(page, HIGH_COMMENT);
+                    if (r === 'missing') {
+                      applied.set(e.testCode, false);
+                      log(
+                        emit,
+                        'warn',
+                        `SID ${sid} ${e.testCode}: sample Comments textarea not found (high-comment)`
+                      );
+                    } else {
+                      applied.set(e.testCode, true);
+                      if (r === 'appended' || r === 'set') savePending = true;
+                    }
+                  } else {
+                    applied.set(e.testCode, false);
+                  }
+                }
+              }
+              const saveClicked = writeMode && savePending ? await clickSaveAndSettle(page) : false;
+              for (const e of evals) {
                 emit?.({
                   type: 'SID_AUTH_DECISION',
                   runId,
                   sid,
-                  testCode: B12,
-                  decision,
-                  reason,
+                  testCode: e.testCode,
+                  decision: e.decision,
+                  reason: e.reason,
                   ageMonths,
                   sex,
                   writeMode,
-                  applied,
-                  saveClicked,
-                });
-              } else {
-                seenSids.set(sid, acc);
-                modalsOpened += 1;
-                emit?.({
-                  type: 'SID_TEST_FOUND',
-                  runId,
-                  sid,
-                  discoveredViaTestCode: code,
-                  discoveredViaStatus: status,
-                  tests: deduped,
+                  applied: applied.get(e.testCode) ?? false,
+                  saveClicked: evals.length > 0 ? saveClicked : false,
                 });
               }
             } catch (e) {

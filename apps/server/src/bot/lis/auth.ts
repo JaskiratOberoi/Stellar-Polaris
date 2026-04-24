@@ -106,6 +106,61 @@ export async function ensureSampleComment(page: Page, line: string): Promise<Sam
   }, line);
 }
 
+/**
+ * Per-row Comments (`txtComments` in the grid row), e.g. Total IgE high-result note.
+ * Does not use the modal-level `txtSampleComments` textarea.
+ */
+export async function ensureRowComment(
+  page: Page,
+  patternSources: string[],
+  line: string
+): Promise<SampleCommentResult> {
+  return page.evaluate(
+    (payload: { sources: string[]; text: string }) => {
+      const { sources, text } = payload;
+      const norm = (raw: string) =>
+        String(raw ?? '')
+          .replace(/\u00A0/g, ' ')
+          .replace(/[\u2018\u2019\u201A\u2032\u0060]/g, "'")
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+      const matchName = (raw: string) => {
+        const n = norm(raw);
+        if (!n) return false;
+        for (const s of sources) {
+          try {
+            if (new RegExp(s, 'i').test(n)) return true;
+          } catch {
+            /* ignore */
+          }
+        }
+        return false;
+      };
+      const table = document.querySelector("table[id*='gvWorksheet']");
+      if (!table) return 'missing';
+      const rows = Array.from(table.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
+      for (const row of rows) {
+        const nameEl = row.querySelector("span[id*='lblTestname']");
+        if (!nameEl) continue;
+        const raw = (nameEl.textContent || '').replace(/\u00A0/g, ' ').trim();
+        if (!matchName(raw)) continue;
+        const el = row.querySelector<HTMLTextAreaElement>("textarea[id*='txtComments']");
+        if (!el) return 'missing';
+        const cur = (el.value || '').trim();
+        if (cur.includes(text)) return 'already';
+        const next = cur ? `${cur}\n${text}` : text;
+        el.value = next;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return cur ? 'appended' : 'set';
+      }
+      return 'missing';
+    },
+    { sources: patternSources, text: line }
+  );
+}
+
 export async function clickSampleSave(page: Page): Promise<boolean> {
   const selectors = [
     "input[type='submit'][id*='btnSave']",

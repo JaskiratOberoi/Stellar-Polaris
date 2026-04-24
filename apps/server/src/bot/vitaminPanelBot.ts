@@ -27,18 +27,22 @@ import {
   openSidWorksheet,
   type WorksheetRow,
 } from './lis/sidWorksheet.js';
-import { matchTestCode } from '../config/testCodeMatchers.js';
+import { matchTestCode, normalizeTestName } from '../config/testCodeMatchers.js';
 import {
   b12NamePatternSources,
   decideB12,
+  decideTotalIgE,
   decideVitD,
   HIGH_COMMENT,
+  IGE_HIGH_COMMENT,
+  igENamePatternSources,
   parseAgeSex,
   vitDNamePatternSources,
 } from '../config/authRules.js';
-import { B12, VITAMIN_D } from '../config/testCodes.js';
+import { B12, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
 import {
   clickSaveAndSettle,
+  ensureRowComment,
   ensureSampleComment,
   isRowAuthed,
   readPatientAgeSex,
@@ -172,6 +176,7 @@ export async function runVitaminPanelScan(options: {
     const seenSids = new Map<string, Set<TestCodeId>>();
     const b12NamePatterns = b12NamePatternSources();
     const vitDNamePatterns = vitDNamePatternSources();
+    const igeNamePatterns = igENamePatternSources();
     let modalsOpened = 0;
     let modalsSkipped = 0;
 
@@ -220,26 +225,32 @@ export async function runVitaminPanelScan(options: {
             try {
               await openSidWorksheet(page, sid);
               const rows = await extractSidWorksheet(page);
+              const hasAllergyProfile = rows.some(
+                (r) => normalizeTestName(r.rawName) === 'allergy profile'
+              );
               const tests: WorksheetTestHit[] = [];
               for (const row of rows) {
                 if (row.isPanelHeader) continue;
                 const matched = matchTestCode(row.rawName);
-                if (matched && enabledCodes.has(matched)) {
-                  tests.push(rowToHit(row, matched));
-                }
+                if (!matched || !enabledCodes.has(matched)) continue;
+                if (matched === TOTAL_IGE && hasAllergyProfile) continue;
+                tests.push(rowToHit(row, matched));
               }
               const deduped = mergeTestsByCode(tests);
               const acc = seenSids.get(sid) ?? new Set<TestCodeId>();
               for (const t of deduped) acc.add(t.testCode);
+              if (enabledCodes.has(TOTAL_IGE) && hasAllergyProfile) acc.add(TOTAL_IGE);
 
               const needB12Auth = enabledCodes.has(B12) && deduped.some((t) => t.testCode === B12);
               const needVitDAuth = enabledCodes.has(VITAMIN_D) && deduped.some((t) => t.testCode === VITAMIN_D);
+              const needIgEAuth =
+                enabledCodes.has(TOTAL_IGE) && deduped.some((t) => t.testCode === TOTAL_IGE);
 
               type AuthEval = { testCode: TestCodeId; decision: B12AuthKind; reason: string };
               const evals: AuthEval[] = [];
               let ageMonths: number | null = null;
               let sex: 'M' | 'F' | null = null;
-              if (needB12Auth || needVitDAuth) {
+              if (needB12Auth || needVitDAuth || needIgEAuth) {
                 const ageText = await readPatientAgeSex(page);
                 const parsed = parseAgeSex(ageText);
                 ageMonths = parsed.ageMonths;
@@ -275,6 +286,23 @@ export async function runVitaminPanelScan(options: {
                   }
                 }
               }
+              if (needIgEAuth) {
+                const igeHit = deduped.find((t) => t.testCode === TOTAL_IGE)!;
+                if (await isRowAuthed(page, igeNamePatterns)) {
+                  evals.push({
+                    testCode: TOTAL_IGE,
+                    decision: 'already-authed',
+                    reason: 'IgE row already authenticated in LIS',
+                  });
+                } else {
+                  const d = decideTotalIgE(igeHit.value);
+                  const decision = planKindToAuth(d);
+                  evals.push({ testCode: TOTAL_IGE, decision, reason: d.reason });
+                  if (decision === 'high-comment' || decision === 'skip') {
+                    log(emit, 'warn', `SID ${sid} Total IgE (BI133): ${decision} — ${d.reason} (manual review)`);
+                  }
+                }
+              }
               for (const e of evals) {
                 if (e.decision === 'defer') acc.delete(e.testCode);
               }
@@ -299,18 +327,28 @@ export async function runVitaminPanelScan(options: {
                     continue;
                   }
                   if (e.decision === 'auth') {
-                    const pats = e.testCode === B12 ? b12NamePatterns : vitDNamePatterns;
+                    const pats =
+                      e.testCode === B12
+                        ? b12NamePatterns
+                        : e.testCode === VITAMIN_D
+                          ? vitDNamePatterns
+                          : igeNamePatterns;
                     const ok = await tickRowAuth(page, pats);
                     applied.set(e.testCode, ok);
                     if (ok) savePending = true;
                   } else if (e.decision === 'high-comment') {
-                    const r = await ensureSampleComment(page, HIGH_COMMENT);
+                    const r =
+                      e.testCode === TOTAL_IGE
+                        ? await ensureRowComment(page, igeNamePatterns, IGE_HIGH_COMMENT)
+                        : await ensureSampleComment(page, HIGH_COMMENT);
                     if (r === 'missing') {
                       applied.set(e.testCode, false);
                       log(
                         emit,
                         'warn',
-                        `SID ${sid} ${e.testCode}: sample Comments textarea not found (high-comment)`
+                        `SID ${sid} ${e.testCode}: ${
+                          e.testCode === TOTAL_IGE ? 'row' : 'sample'
+                        } Comments textarea not found (high-comment)`
                       );
                     } else {
                       applied.set(e.testCode, true);

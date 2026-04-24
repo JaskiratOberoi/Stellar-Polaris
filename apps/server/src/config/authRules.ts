@@ -1,7 +1,10 @@
-import { B12, VITAMIN_D } from './testCodes.js';
+import { B12, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
 import { TEST_CODE_NAME_PATTERNS } from './testCodeMatchers.js';
 
 export const HIGH_COMMENT = 'Result Rechecked, kindly check with supplement history.';
+
+export const IGE_HIGH_COMMENT =
+  'Result Rechecked, kindly correlate clinically. Advice: Allergy Profile.';
 
 export type B12Decision =
   | { kind: 'auth'; reason: string }
@@ -29,6 +32,30 @@ export function vitDNamePatternSources(): string[] {
 export function decideVitD(rawValue: string | null): VitDDecision {
   const lower = 5;
   const upper = 100;
+  const v = (rawValue ?? '').trim();
+  if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
+  if (/^>/.test(v)) return { kind: 'high-comment', reason: `value ${v} above scale` };
+  const n = Number(String(v).replace(/,/g, ''));
+  if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (n < lower) return { kind: 'skip', reason: `value ${n} < ${lower} (low, manual review)` };
+  if (n > upper) return { kind: 'high-comment', reason: `value ${n} > ${upper}` };
+  return { kind: 'auth', reason: `value ${n} within ${lower}-${upper}` };
+}
+
+export type IgEDecision =
+  | { kind: 'auth'; reason: string }
+  | { kind: 'high-comment'; reason: string }
+  | { kind: 'defer'; reason: string }
+  | { kind: 'skip'; reason: string };
+
+export function igENamePatternSources(): string[] {
+  return TEST_CODE_NAME_PATTERNS[TOTAL_IGE].map((r) => r.source);
+}
+
+/** 0-100y reference 10-190. Per-row `txtComments` (not `txtSampleComments`) on high. */
+export function decideTotalIgE(rawValue: string | null): IgEDecision {
+  const lower = 10;
+  const upper = 190;
   const v = (rawValue ?? '').trim();
   if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
   if (/^>/.test(v)) return { kind: 'high-comment', reason: `value ${v} above scale` };

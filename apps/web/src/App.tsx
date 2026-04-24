@@ -1,0 +1,194 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { RunConfig, TestCodeId, WsClientEvent } from '@stellar/shared';
+import { atLeastOneTestCodeOn, selectedTestCodesInOrder, TestCodeToggles } from './components/TestCodeToggles';
+import { FiltersPanel } from './components/FiltersPanel';
+import { RunControls } from './components/RunControls';
+import { SidGrid, type SidRow } from './components/SidGrid';
+import { getRunStatus, postRun, postStop } from './lib/api';
+import { connectRunWebSocket } from './lib/wsClient';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
+
+const initialEnabled: Record<TestCodeId, boolean> = { BI235: true, BI005: true };
+
+function parseHourField(s: string): number | null | undefined {
+  if (!s.trim()) return undefined;
+  const n = Number(s);
+  if (Number.isNaN(n) || n < 0 || n > 23) return undefined;
+  return n;
+}
+
+function buildRunConfig(
+  testCodes: TestCodeId[],
+  bu: string,
+  statuses: string[],
+  fromDate: string,
+  toDate: string,
+  fromHour: string,
+  toHour: string
+): RunConfig {
+  const c: RunConfig = {
+    testCodes,
+    businessUnit: bu.trim() || 'QUGEN',
+    statusLabels: statuses,
+    headless: true,
+  };
+  if (fromDate.trim()) c.fromDate = fromDate.trim();
+  if (toDate.trim()) c.toDate = toDate.trim();
+  const fh = parseHourField(fromHour);
+  const th = parseHourField(toHour);
+  if (fh != null) c.fromHour = fh;
+  if (th != null) c.toHour = th;
+  return c;
+}
+
+export function App() {
+  const [enabled, setEnabled] = useState(initialEnabled);
+  const [bu, setBu] = useState('QUGEN');
+  const [statusSelection, setStatusSelection] = useState<string[]>(['Tested', 'Partially Tested']);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [fromHour, setFromHour] = useState('');
+  const [toHour, setToHour] = useState('');
+  const [logs, setLogs] = useState<string[]>([]);
+  const [rows, setRows] = useState<SidRow[]>([]);
+  const [running, setRunning] = useState(false);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const onWs = useCallback((ev: WsClientEvent) => {
+    if (ev.type === 'LOG') {
+      setLogs((prev) => [`[${new Date(ev.ts).toLocaleTimeString()}] ${ev.message}`, ...prev].slice(0, 200));
+      return;
+    }
+    if (ev.type === 'RUN_STARTED') {
+      setRunning(true);
+      setLastRunId(ev.runId);
+      setRows([]);
+      return;
+    }
+    if (ev.type === 'SID_FOUND') {
+      setRows((prev) => {
+        if (ev.testCode !== 'BI235' && ev.testCode !== 'BI005') return prev;
+        return [...prev, { testCode: ev.testCode, status: ev.status, sid: ev.sid }];
+      });
+      return;
+    }
+    if (ev.type === 'RUN_DONE' || ev.type === 'RUN_ERROR' || ev.type === 'RUN_STOPPED') {
+      setRunning(false);
+      if (ev.type === 'RUN_ERROR') {
+        setErr(ev.error);
+      } else {
+        setErr(null);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    return connectRunWebSocket(onWs);
+  }, [onWs]);
+
+  useEffect(() => {
+    getRunStatus()
+      .then((s) => {
+        if (s.running) setRunning(true);
+        if (s.runId) setLastRunId(s.runId);
+      })
+      .catch(() => {
+        /* dev server not up */
+      });
+  }, []);
+
+  const canStart = useMemo(() => {
+    return atLeastOneTestCodeOn(enabled) && statusSelection.length > 0;
+  }, [enabled, statusSelection]);
+
+  const onStart = async () => {
+    setErr(null);
+    const testCodes = selectedTestCodesInOrder(enabled);
+    const config = buildRunConfig(testCodes, bu, statusSelection, fromDate, toDate, fromHour, toHour);
+    try {
+      const r = await postRun(config);
+      setLastRunId(r.runId);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onStop = async () => {
+    try {
+      await postStop();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="mx-auto min-h-screen max-w-4xl p-6 pb-16">
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight">Stellar Polaris</h1>
+        <p className="text-sm text-zinc-400">Vitamin B12 and Vitamin D worksheet SID listing (LIS sample grid only).</p>
+        <p className="mt-1 text-xs text-zinc-500">LIS login uses credentials from the server <code className="text-zinc-400">.env</code> only (e.g. <code className="text-zinc-400">LIS_USERNAME</code> / <code className="text-zinc-400">LIS_PASSWORD</code>).</p>
+        {lastRunId && <p className="mt-2 text-xs text-zinc-500">Run id: {lastRunId}</p>}
+        {err && <p className="mt-2 text-sm text-red-400">Error: {err}</p>}
+        {running && <p className="mt-2 text-sm text-amber-400">Scan in progress…</p>}
+      </header>
+
+      <div className="space-y-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Test codes</CardTitle>
+            <CardDescription>Enable one or both. The bot processes enabled codes in order: BI235 then BI005.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <TestCodeToggles
+              enabled={enabled}
+              onChange={(id, v) => setEnabled((e) => ({ ...e, [id]: v }))}
+            />
+            <div className="pt-4">
+              <RunControls
+                running={running}
+                canStart={canStart}
+                onStart={onStart}
+                onStop={onStop}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <FiltersPanel
+          businessUnit={bu}
+          onBusinessUnit={setBu}
+          statusSelection={statusSelection}
+          onStatusSelection={setStatusSelection}
+          fromDate={fromDate}
+          toDate={toDate}
+          onFromDate={setFromDate}
+          onToDate={setToDate}
+          fromHour={fromHour}
+          toHour={toHour}
+          onFromHour={setFromHour}
+          onToHour={setToHour}
+        />
+
+        <SidGrid rows={rows} />
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Log (latest first)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {logs.length === 0 ? (
+              <p className="text-sm text-zinc-500">…</p>
+            ) : (
+              <ul className="max-h-64 list-none space-y-0.5 overflow-y-auto font-mono text-xs text-zinc-400">
+                {logs.map((l, i) => (
+                  <li key={i}>{l}</li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

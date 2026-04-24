@@ -1,0 +1,23 @@
+{
+  "name": "stellar-polaris",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"pnpm --filter @stellar/server dev\" \"pnpm --filter @stellar/web dev\"",
+    "build": "pnpm --filter @stellar/shared build && pnpm --filter @stellar/server build && pnpm --filter @stellar/web build",
+    "start": "pnpm --filter @stellar/server start",
+    "lint": "eslint .",
+    "format": "prettier -w .",
+    "puppeteer:install-chrome": "pnpm --filter @stellar/server exec puppeteer browsers install chrome"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "concurrently": "^9.1.0",
+    "eslint": "^9.16.0",
+    "globals": "^15.13.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0"
+  }
+}

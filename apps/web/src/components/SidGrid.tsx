@@ -12,6 +12,10 @@ export type SidEntry = {
   testsByCode: Partial<Record<TestCodeId, WorksheetTestHit>>;
   /** B12 (BI235) auth workflow outcome from `SID_AUTH_DECISION`. */
   authByCode?: Partial<Record<TestCodeId, SidAuthRecord>>;
+  /** Set when the modal has ALLERGY PROFILE: IgE is not a separate row for our bot. */
+  allergyProfileSuppressedTotalIgE?: boolean;
+  suppressedTotalIgEValue?: string | null;
+  suppressedTotalIgEUnit?: string | null;
 };
 
 export type SidGridProps = {
@@ -163,6 +167,36 @@ function AuthWorkflowBadge({ code, r }: { code: TestCodeId; r: SidAuthRecord }) 
   return null;
 }
 
+function AllergyProfileIgEBadge({
+  value,
+  unit,
+}: {
+  value?: string | null;
+  unit?: string | null;
+}) {
+  const v = value != null && String(value).trim() !== '' ? String(value).trim() : null;
+  const t = v
+    ? `Total IgE ${v}${unit ? ' ' + unit : ''} is inside an Allergy Profile; automated IgE auth and high-IgE comment are skipped.`
+    : 'This SID includes an Allergy Profile; Total IgE is not processed separately (no automated IgE auth or comment).';
+  return (
+    <span
+      className="inline-flex max-w-full flex-wrap items-center gap-1 rounded border border-violet-500/50 bg-violet-950/40 px-1.5 py-0.5 text-[10px] text-violet-200/95"
+      title={t}
+    >
+      <span className="font-medium">Total IgE</span>
+      <span className="text-violet-400/90">·</span>
+      <span>Allergy Profile</span>
+      {v ? (
+        <span className="font-mono text-amber-200/90 tabular-nums">
+          {v}
+          {unit ? <span className="ml-0.5 text-violet-300/80">{unit}</span> : null}
+        </span>
+      ) : null}
+      <span className="text-violet-300/80">· auth N/A</span>
+    </span>
+  );
+}
+
 export function SidGrid({ entries, skippedDedup, summary, className }: SidGridProps) {
   if (entries.length === 0) {
     return (
@@ -213,13 +247,22 @@ export function SidGrid({ entries, skippedDedup, summary, className }: SidGridPr
                     <TestPill key={code} code={code} hit={e.testsByCode[code]!} />
                   ))}
                 </div>
-                {e.authByCode && Object.keys(e.authByCode).length > 0 ? (
+                {e.allergyProfileSuppressedTotalIgE ||
+                (e.authByCode && Object.keys(e.authByCode).length > 0) ? (
                   <div className="flex flex-wrap justify-end gap-1">
-                    {(Object.entries(e.authByCode) as [TestCodeId, SidAuthRecord][])
-                      .filter(([, rec]) => rec)
-                      .map(([code, rec]) => (
-                        <AuthWorkflowBadge key={`auth-${code}`} code={code} r={rec} />
-                      ))}
+                    {e.allergyProfileSuppressedTotalIgE ? (
+                      <AllergyProfileIgEBadge
+                        value={e.suppressedTotalIgEValue}
+                        unit={e.suppressedTotalIgEUnit}
+                      />
+                    ) : null}
+                    {e.authByCode && Object.keys(e.authByCode).length > 0
+                      ? (Object.entries(e.authByCode) as [TestCodeId, SidAuthRecord][])
+                          .filter(([, rec]) => rec)
+                          .map(([code, rec]) => (
+                            <AuthWorkflowBadge key={`auth-${code}`} code={code} r={rec} />
+                          ))
+                      : null}
                   </div>
                 ) : null}
               </div>

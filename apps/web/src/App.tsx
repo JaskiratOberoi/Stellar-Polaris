@@ -80,7 +80,18 @@ export function App() {
       return;
     }
     if (ev.type === 'SID_TEST_FOUND') {
-      setEntries((prev) => upsertSidEntry(prev, ev.sid, ev.discoveredViaTestCode, ev.discoveredViaStatus, ev.tests));
+      setEntries((prev) =>
+        upsertSidEntry(
+          prev,
+          ev.sid,
+          ev.discoveredViaTestCode,
+          ev.discoveredViaStatus,
+          ev.tests,
+          ev.allergyProfileSuppressedTotalIgE,
+          ev.suppressedTotalIgEValue,
+          ev.suppressedTotalIgEUnit
+        )
+      );
       return;
     }
     if (ev.type === 'SID_AUTH_DECISION') {
@@ -130,7 +141,10 @@ export function App() {
     sid: string,
     discoveredViaTestCode: TestCodeId,
     discoveredViaStatus: string,
-    tests: WorksheetTestHit[]
+    tests: WorksheetTestHit[],
+    allergyProfileSuppressedTotalIgE?: boolean,
+    suppressedTotalIgEValue?: string | null,
+    suppressedTotalIgEUnit?: string | null
   ): SidEntry[] {
     const idx = prev.findIndex((e) => e.sid === sid);
     if (idx === -1) {
@@ -140,14 +154,28 @@ export function App() {
         firstSeenViaStatus: discoveredViaStatus,
         testsByCode: {},
         authByCode: {},
+        allergyProfileSuppressedTotalIgE: allergyProfileSuppressedTotalIgE || false,
+        suppressedTotalIgEValue: suppressedTotalIgEValue ?? undefined,
+        suppressedTotalIgEUnit: suppressedTotalIgEUnit ?? undefined,
       };
       for (const t of tests) next.testsByCode[t.testCode] = t;
       return [...prev, next];
     }
+    const prevRow = prev[idx]!;
     const merged: SidEntry = {
-      ...prev[idx]!,
-      testsByCode: { ...prev[idx]!.testsByCode },
-      authByCode: { ...(prev[idx]!.authByCode ?? {}) },
+      ...prevRow,
+      testsByCode: { ...prevRow.testsByCode },
+      authByCode: { ...(prevRow.authByCode ?? {}) },
+      allergyProfileSuppressedTotalIgE:
+        prevRow.allergyProfileSuppressedTotalIgE || Boolean(allergyProfileSuppressedTotalIgE),
+      suppressedTotalIgEValue:
+        suppressedTotalIgEValue != null
+          ? suppressedTotalIgEValue
+          : prevRow.suppressedTotalIgEValue,
+      suppressedTotalIgEUnit:
+        suppressedTotalIgEUnit != null && suppressedTotalIgEUnit !== ''
+          ? suppressedTotalIgEUnit
+          : prevRow.suppressedTotalIgEUnit,
     };
     for (const t of tests) merged.testsByCode[t.testCode] = t;
     const out = prev.slice();

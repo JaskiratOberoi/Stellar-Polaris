@@ -81,6 +81,15 @@ export type WsClientEvent =
       discoveredViaTestCode: TestCodeId;
       discoveredViaStatus: string;
       tests: WorksheetTestHit[];
+      /**
+       * When the modal includes an ALLERGY PROFILE row, Total IgE (BI133) is
+       * not listed in `tests` and no IgE `SID_AUTH_DECISION` is emitted; the UI
+       * can show this so operators know IgE is covered by the panel.
+       */
+      allergyProfileSuppressedTotalIgE?: boolean;
+      /** Value/unit from the IgE row in the modal when `allergyProfileSuppressedTotalIgE` is true. */
+      suppressedTotalIgEValue?: string | null;
+      suppressedTotalIgEUnit?: string | null;
     }
   | {
       /** Emitted when a later sweep encounters a SID whose modal is already fully resolved. */

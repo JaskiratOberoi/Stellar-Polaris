@@ -52,8 +52,12 @@ ws.on('message', (raw) => {
       : ev.tests
           .map((t) => `${t.testCode}=${t.value ?? 'null'}${t.unit ? ' ' + t.unit : ''}${t.abnormal ? ' [AB]' : ''}${t.borderColor ? ' (' + t.borderColor + ')' : ''}`)
           .join(', ');
+    const ap =
+      ev.allergyProfileSuppressedTotalIgE
+        ? ` [AllergyProfile: IgE ${ev.suppressedTotalIgEValue ?? '—'}${ev.suppressedTotalIgEUnit ? ' ' + ev.suppressedTotalIgEUnit : ''} suppressed]`
+        : '';
     console.log(
-      `[SID #${sidCount}] sid=${ev.sid} via=${ev.discoveredViaTestCode}/${ev.discoveredViaStatus}: ${summary}`
+      `[SID #${sidCount}] sid=${ev.sid} via=${ev.discoveredViaTestCode}/${ev.discoveredViaStatus}: ${summary}${ap}`
     );
     return;
   }

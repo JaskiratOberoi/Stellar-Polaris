@@ -228,6 +228,18 @@ export async function runVitaminPanelScan(options: {
               const hasAllergyProfile = rows.some(
                 (r) => normalizeTestName(r.rawName) === 'allergy profile'
               );
+              let suppressedTotalIgEValue: string | null = null;
+              let suppressedTotalIgEUnit: string | null = null;
+              if (hasAllergyProfile && enabledCodes.has(TOTAL_IGE)) {
+                for (const row of rows) {
+                  if (row.isPanelHeader) continue;
+                  if (matchTestCode(row.rawName) === TOTAL_IGE) {
+                    suppressedTotalIgEValue = row.value;
+                    suppressedTotalIgEUnit = row.unit;
+                    break;
+                  }
+                }
+              }
               const tests: WorksheetTestHit[] = [];
               for (const row of rows) {
                 if (row.isPanelHeader) continue;
@@ -315,6 +327,13 @@ export async function runVitaminPanelScan(options: {
                 discoveredViaTestCode: code,
                 discoveredViaStatus: status,
                 tests: deduped,
+                ...(hasAllergyProfile && enabledCodes.has(TOTAL_IGE)
+                  ? {
+                      allergyProfileSuppressedTotalIgE: true,
+                      suppressedTotalIgEValue,
+                      suppressedTotalIgEUnit,
+                    }
+                  : {}),
               });
 
               const writeMode = config.authenticate === true;

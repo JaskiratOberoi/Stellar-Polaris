@@ -29,6 +29,14 @@ pnpm dev
 
 Open `http://localhost:5173`.
 
+### B12 (BI235) authentication
+
+The UI has **Authenticate (write mode)** (default: off). When off, the server still reads patient age from the modal, applies the B12 reference rules, and streams `SID_AUTH_DECISION` over the WebSocket with `writeMode: false` — **no** checkbox clicks, sample comments, or Save.
+
+When the toggle is on, `RunConfig.authenticate` is set and the bot may tick the B12 row `chkAuth` (in-range), append the high-result line to the sample **Comments** textarea, and click **Save**. This **changes live LIS data** — use dry runs first.
+
+`POST /api/run` may include `"authenticate": true` to mirror the UI (JSON body).
+
 ## Build + run server only
 
 ```bash

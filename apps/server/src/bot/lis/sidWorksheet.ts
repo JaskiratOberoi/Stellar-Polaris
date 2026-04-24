@@ -110,7 +110,9 @@ export async function extractSidWorksheet(page: Page): Promise<WorksheetRow[]> {
 
       const unitText = (unitEl?.textContent || '').trim();
 
-      const isPanelHeader = !valueEl && !unitEl && !abEl && !authEl;
+      // Section headings (e.g. "ALLERGY PROFILE", "Total IgE") can have an empty
+      // lblTestunit span but no value control; those are not data rows.
+      const isPanelHeader = !valueEl;
 
       out.push({
         rawName,

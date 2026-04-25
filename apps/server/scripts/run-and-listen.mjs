@@ -56,8 +56,11 @@ ws.on('message', (raw) => {
       ev.allergyProfileSuppressedTotalIgE
         ? ` [AllergyProfile: IgE ${ev.suppressedTotalIgEValue ?? '—'}${ev.suppressedTotalIgEUnit ? ' ' + ev.suppressedTotalIgEUnit : ''} suppressed]`
         : '';
+    const gate = ev.authGateSkipped
+      ? ` [AuthGate: skip — ${ev.authGateReason ?? 'reason n/a'}]`
+      : '';
     console.log(
-      `[SID #${sidCount}] sid=${ev.sid} via=${ev.discoveredViaTestCode}/${ev.discoveredViaStatus}: ${summary}${ap}`
+      `[SID #${sidCount}] sid=${ev.sid} via=${ev.discoveredViaTestCode}/${ev.discoveredViaStatus}: ${summary}${ap}${gate}`
     );
     return;
   }

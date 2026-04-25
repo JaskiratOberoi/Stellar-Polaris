@@ -37,6 +37,8 @@ The UI has **Authenticate (write mode)** (default: off). When off, the server st
 
 **B12 / Vit D:** when the toggle is on, the bot may tick the matching row `chkAuth` (in-range). For high-out-of-range, it appends `? Supplement History` to the modal sample **Comments** (top right, at most once if both are high) and `Result Rechecked, kindly check with supplement history.` to that test’s per-row **Comments**; adds IgE per-row text when applicable, then **Save once** for the whole modal. This **changes live LIS data** — use dry runs first.
 
+**Auth gate:** the bot only automates SIDs whose worksheet (excluding panel headers) contains **only** Vitamin B12, or only Vitamin D, or B12 and Vit D together, or only Total IgE. If the modal has any other test row (e.g. LIPID PROFILE, LFT, ALLERGY PROFILE subtests), or if Total IgE appears **with** B12 and/or Vit D, it does not authenticate and emits `decision=skip` for each present enabled test with a reason. The web UI shows an **Auth gate** tag for those SIDs.
+
 `POST /api/run` may include `"authenticate": true` to mirror the UI (JSON body).
 
 ## Build + run server only

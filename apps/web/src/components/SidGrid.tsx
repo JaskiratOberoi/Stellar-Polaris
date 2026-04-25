@@ -16,6 +16,9 @@ export type SidEntry = {
   allergyProfileSuppressedTotalIgE?: boolean;
   suppressedTotalIgEValue?: string | null;
   suppressedTotalIgEUnit?: string | null;
+  /** Worksheet has extra tests or disallowed combo; bot skips all auth for this SID. */
+  authGateSkipped?: boolean;
+  authGateReason?: string;
 };
 
 export type SidGridProps = {
@@ -167,6 +170,23 @@ function AuthWorkflowBadge({ code, r }: { code: TestCodeId; r: SidAuthRecord }) 
   return null;
 }
 
+function AuthGateBadge({ reason }: { reason?: string }) {
+  const t =
+    reason?.trim() ||
+    'This worksheet is not limited to B12, Vit D, B12+Vit D, or solo Total IgE; authentication is skipped.';
+  return (
+    <span
+      className="inline-flex max-w-full flex-wrap items-center gap-1 rounded border border-amber-500/45 bg-amber-950/35 px-1.5 py-0.5 text-[10px] text-amber-200/95"
+      title={t}
+    >
+      <span className="font-medium">Auth gate</span>
+      <span className="text-amber-400/90">·</span>
+      <span>skip</span>
+      <span className="text-amber-300/80">· other tests / mixed panel</span>
+    </span>
+  );
+}
+
 function AllergyProfileIgEBadge({
   value,
   unit,
@@ -248,8 +268,10 @@ export function SidGrid({ entries, skippedDedup, summary, className }: SidGridPr
                   ))}
                 </div>
                 {e.allergyProfileSuppressedTotalIgE ||
+                e.authGateSkipped ||
                 (e.authByCode && Object.keys(e.authByCode).length > 0) ? (
                   <div className="flex flex-wrap justify-end gap-1">
+                    {e.authGateSkipped ? <AuthGateBadge reason={e.authGateReason} /> : null}
                     {e.allergyProfileSuppressedTotalIgE ? (
                       <AllergyProfileIgEBadge
                         value={e.suppressedTotalIgEValue}

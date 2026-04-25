@@ -89,7 +89,9 @@ export function App() {
           ev.tests,
           ev.allergyProfileSuppressedTotalIgE,
           ev.suppressedTotalIgEValue,
-          ev.suppressedTotalIgEUnit
+          ev.suppressedTotalIgEUnit,
+          ev.authGateSkipped,
+          ev.authGateReason
         )
       );
       return;
@@ -144,7 +146,9 @@ export function App() {
     tests: WorksheetTestHit[],
     allergyProfileSuppressedTotalIgE?: boolean,
     suppressedTotalIgEValue?: string | null,
-    suppressedTotalIgEUnit?: string | null
+    suppressedTotalIgEUnit?: string | null,
+    authGateSkipped?: boolean,
+    authGateReason?: string
   ): SidEntry[] {
     const idx = prev.findIndex((e) => e.sid === sid);
     if (idx === -1) {
@@ -157,6 +161,8 @@ export function App() {
         allergyProfileSuppressedTotalIgE: allergyProfileSuppressedTotalIgE || false,
         suppressedTotalIgEValue: suppressedTotalIgEValue ?? undefined,
         suppressedTotalIgEUnit: suppressedTotalIgEUnit ?? undefined,
+        authGateSkipped: authGateSkipped || false,
+        authGateReason: authGateReason ?? undefined,
       };
       for (const t of tests) next.testsByCode[t.testCode] = t;
       return [...prev, next];
@@ -176,6 +182,8 @@ export function App() {
         suppressedTotalIgEUnit != null && suppressedTotalIgEUnit !== ''
           ? suppressedTotalIgEUnit
           : prevRow.suppressedTotalIgEUnit,
+      authGateSkipped: prevRow.authGateSkipped || Boolean(authGateSkipped),
+      authGateReason: authGateReason != null && authGateReason !== '' ? authGateReason : prevRow.authGateReason,
     };
     for (const t of tests) merged.testsByCode[t.testCode] = t;
     const out = prev.slice();

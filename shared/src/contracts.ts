@@ -90,6 +90,9 @@ export type WsClientEvent =
       /** Value/unit from the IgE row in the modal when `allergyProfileSuppressedTotalIgE` is true. */
       suppressedTotalIgEValue?: string | null;
       suppressedTotalIgEUnit?: string | null;
+      /** Set when the modal has extra tests (not only B12 / Vit D / B12+Vit D / solo IgE). */
+      authGateSkipped?: boolean;
+      authGateReason?: string;
     }
   | {
       /** Emitted when a later sweep encounters a SID whose modal is already fully resolved. */

@@ -254,6 +254,25 @@ export async function runVitaminPanelScan(options: {
               for (const t of deduped) acc.add(t.testCode);
               if (enabledCodes.has(TOTAL_IGE) && hasAllergyProfile) acc.add(TOTAL_IGE);
 
+              /** Any named row (including section headers) that is not B12, Vit D, or IgE counts as an extra test for the gate. */
+              const otherTestRows = rows.filter((r) => {
+                if (!String(r.rawName ?? '').trim()) return false;
+                return matchTestCode(r.rawName) == null;
+              });
+              const hasOtherTests = otherTestRows.length > 0;
+              const eligibleSet = new Set(deduped.map((t) => t.testCode));
+              const igeMixed = eligibleSet.has(TOTAL_IGE) && eligibleSet.size > 1;
+              const gateBlocked = hasOtherTests || igeMixed;
+              const gateReason = hasOtherTests
+                ? (() => {
+                    const names = [...new Set(otherTestRows.map((r) => r.rawName))];
+                    const head = names.slice(0, 4).join(', ');
+                    return `auth gate: other tests present in worksheet (manual review): ${head}${
+                      names.length > 4 ? ', …' : ''
+                    }`;
+                  })()
+                : 'auth gate: IgE cannot be authenticated alongside B12 or Vit D (manual review)';
+
               const needB12Auth = enabledCodes.has(B12) && deduped.some((t) => t.testCode === B12);
               const needVitDAuth = enabledCodes.has(VITAMIN_D) && deduped.some((t) => t.testCode === VITAMIN_D);
               const needIgEAuth =
@@ -263,56 +282,69 @@ export async function runVitaminPanelScan(options: {
               const evals: AuthEval[] = [];
               let ageMonths: number | null = null;
               let sex: 'M' | 'F' | null = null;
-              if (needB12Auth || needVitDAuth || needIgEAuth) {
+              if (!gateBlocked && (needB12Auth || needVitDAuth || needIgEAuth)) {
                 const ageText = await readPatientAgeSex(page);
                 const parsed = parseAgeSex(ageText);
                 ageMonths = parsed.ageMonths;
                 sex = parsed.sex;
               }
-              if (needB12Auth) {
-                const b12Hit = deduped.find((t) => t.testCode === B12)!;
-                if (await isRowAuthed(page, b12NamePatterns)) {
-                  evals.push({
-                    testCode: B12,
-                    decision: 'already-authed',
-                    reason: 'B12 row already authenticated in LIS',
-                  });
-                } else {
-                  const d = decideB12(b12Hit.value, ageMonths);
-                  evals.push({ testCode: B12, decision: planKindToAuth(d), reason: d.reason });
+              if (gateBlocked) {
+                if (needB12Auth) {
+                  evals.push({ testCode: B12, decision: 'skip', reason: gateReason });
                 }
-              }
-              if (needVitDAuth) {
-                const vitDHit = deduped.find((t) => t.testCode === VITAMIN_D)!;
-                if (await isRowAuthed(page, vitDNamePatterns)) {
-                  evals.push({
-                    testCode: VITAMIN_D,
-                    decision: 'already-authed',
-                    reason: 'Vitamin D row already authenticated in LIS',
-                  });
-                } else {
-                  const d = decideVitD(vitDHit.value);
-                  const decision = planKindToAuth(d);
-                  evals.push({ testCode: VITAMIN_D, decision, reason: d.reason });
-                  if (decision === 'high-comment' || decision === 'skip') {
-                    log(emit, 'warn', `SID ${sid} Vit D (BI005): ${decision} — ${d.reason} (manual review)`);
+                if (needVitDAuth) {
+                  evals.push({ testCode: VITAMIN_D, decision: 'skip', reason: gateReason });
+                }
+                if (needIgEAuth) {
+                  evals.push({ testCode: TOTAL_IGE, decision: 'skip', reason: gateReason });
+                }
+                if (evals.length > 0) log(emit, 'warn', `SID ${sid}: ${gateReason}`);
+              } else {
+                if (needB12Auth) {
+                  const b12Hit = deduped.find((t) => t.testCode === B12)!;
+                  if (await isRowAuthed(page, b12NamePatterns)) {
+                    evals.push({
+                      testCode: B12,
+                      decision: 'already-authed',
+                      reason: 'B12 row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideB12(b12Hit.value, ageMonths);
+                    evals.push({ testCode: B12, decision: planKindToAuth(d), reason: d.reason });
                   }
                 }
-              }
-              if (needIgEAuth) {
-                const igeHit = deduped.find((t) => t.testCode === TOTAL_IGE)!;
-                if (await isRowAuthed(page, igeNamePatterns)) {
-                  evals.push({
-                    testCode: TOTAL_IGE,
-                    decision: 'already-authed',
-                    reason: 'IgE row already authenticated in LIS',
-                  });
-                } else {
-                  const d = decideTotalIgE(igeHit.value);
-                  const decision = planKindToAuth(d);
-                  evals.push({ testCode: TOTAL_IGE, decision, reason: d.reason });
-                  if (decision === 'high-comment' || decision === 'skip') {
-                    log(emit, 'warn', `SID ${sid} Total IgE (BI133): ${decision} — ${d.reason} (manual review)`);
+                if (needVitDAuth) {
+                  const vitDHit = deduped.find((t) => t.testCode === VITAMIN_D)!;
+                  if (await isRowAuthed(page, vitDNamePatterns)) {
+                    evals.push({
+                      testCode: VITAMIN_D,
+                      decision: 'already-authed',
+                      reason: 'Vitamin D row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideVitD(vitDHit.value);
+                    const decision = planKindToAuth(d);
+                    evals.push({ testCode: VITAMIN_D, decision, reason: d.reason });
+                    if (decision === 'high-comment' || decision === 'skip') {
+                      log(emit, 'warn', `SID ${sid} Vit D (BI005): ${decision} — ${d.reason} (manual review)`);
+                    }
+                  }
+                }
+                if (needIgEAuth) {
+                  const igeHit = deduped.find((t) => t.testCode === TOTAL_IGE)!;
+                  if (await isRowAuthed(page, igeNamePatterns)) {
+                    evals.push({
+                      testCode: TOTAL_IGE,
+                      decision: 'already-authed',
+                      reason: 'IgE row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideTotalIgE(igeHit.value);
+                    const decision = planKindToAuth(d);
+                    evals.push({ testCode: TOTAL_IGE, decision, reason: d.reason });
+                    if (decision === 'high-comment' || decision === 'skip') {
+                      log(emit, 'warn', `SID ${sid} Total IgE (BI133): ${decision} — ${d.reason} (manual review)`);
+                    }
                   }
                 }
               }
@@ -334,6 +366,9 @@ export async function runVitaminPanelScan(options: {
                       suppressedTotalIgEValue,
                       suppressedTotalIgEUnit,
                     }
+                  : {}),
+                ...(gateBlocked
+                  ? { authGateSkipped: true as const, authGateReason: gateReason }
                   : {}),
               });
 

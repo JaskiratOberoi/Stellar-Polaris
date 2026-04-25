@@ -35,7 +35,7 @@ The UI has **Authenticate (write mode)** (default: off). When off, the server st
 
 **Total IgE:** if the modal contains an **ALLERGY PROFILE** row, Total IgE is not listed in that SID’s `tests` and no IgE auth decision is emitted (it is still marked resolved so a BI133-only pass does not re-open the same SID). Otherwise the bot may tick `chkAuth` on the IgE row in range, or append a high-out-of-range line to that row’s per-row **Comments** (`txtComments` — not the same field as the shared sample Comments used for B12 and Vit D).
 
-**B12 / Vit D:** when the toggle is on, the bot may tick the matching row `chkAuth` (in-range), append the shared high-result line to the sample **Comments** textarea (at most once if both B12 and Vit D are out of range in the same SID), add IgE per-row text when applicable, then click **Save once** for the whole modal. This **changes live LIS data** — use dry runs first.
+**B12 / Vit D:** when the toggle is on, the bot may tick the matching row `chkAuth` (in-range). For high-out-of-range, it appends `? Supplement History` to the modal sample **Comments** (top right, at most once if both are high) and `Result Rechecked, kindly check with supplement history.` to that test’s per-row **Comments**; adds IgE per-row text when applicable, then **Save once** for the whole modal. This **changes live LIS data** — use dry runs first.
 
 `POST /api/run` may include `"authenticate": true` to mirror the UI (JSON body).
 

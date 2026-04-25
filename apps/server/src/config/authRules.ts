@@ -1,7 +1,11 @@
 import { B12, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
 import { TEST_CODE_NAME_PATTERNS } from './testCodeMatchers.js';
 
+/** Per-row B12 / Vit D Comments (`txtComments`) when value is out of range high. */
 export const HIGH_COMMENT = 'Result Rechecked, kindly check with supplement history.';
+
+/** Modal-level sample Comments box (top right, `txtSampleComments`) for B12 / Vit D high. */
+export const SUPPLEMENT_HISTORY_PROMPT = '? Supplement History';
 
 export const IGE_HIGH_COMMENT =
   'Result Rechecked, kindly correlate clinically. Advice: Allergy Profile.';

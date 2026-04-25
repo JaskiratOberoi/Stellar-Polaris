@@ -36,6 +36,7 @@ import {
   HIGH_COMMENT,
   IGE_HIGH_COMMENT,
   igENamePatternSources,
+  SUPPLEMENT_HISTORY_PROMPT,
   parseAgeSex,
   vitDNamePatternSources,
 } from '../config/authRules.js';
@@ -356,22 +357,36 @@ export async function runVitaminPanelScan(options: {
                     applied.set(e.testCode, ok);
                     if (ok) savePending = true;
                   } else if (e.decision === 'high-comment') {
-                    const r =
-                      e.testCode === TOTAL_IGE
-                        ? await ensureRowComment(page, igeNamePatterns, IGE_HIGH_COMMENT)
-                        : await ensureSampleComment(page, HIGH_COMMENT);
-                    if (r === 'missing') {
-                      applied.set(e.testCode, false);
-                      log(
-                        emit,
-                        'warn',
-                        `SID ${sid} ${e.testCode}: ${
-                          e.testCode === TOTAL_IGE ? 'row' : 'sample'
-                        } Comments textarea not found (high-comment)`
-                      );
+                    if (e.testCode === TOTAL_IGE) {
+                      const r = await ensureRowComment(page, igeNamePatterns, IGE_HIGH_COMMENT);
+                      if (r === 'missing') {
+                        applied.set(e.testCode, false);
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: row Comments not found (high-comment)`);
+                      } else {
+                        applied.set(e.testCode, true);
+                        if (r === 'appended' || r === 'set') savePending = true;
+                      }
                     } else {
-                      applied.set(e.testCode, true);
-                      if (r === 'appended' || r === 'set') savePending = true;
+                      const pats = e.testCode === B12 ? b12NamePatterns : vitDNamePatterns;
+                      const sampleR = await ensureSampleComment(page, SUPPLEMENT_HISTORY_PROMPT);
+                      const rowR = await ensureRowComment(page, pats, HIGH_COMMENT);
+                      const sampleOk = sampleR !== 'missing';
+                      const rowOk = rowR !== 'missing';
+                      applied.set(e.testCode, sampleOk && rowOk);
+                      if (!sampleOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: sample Comments not found (high-comment)`);
+                      }
+                      if (!rowOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: row Comments not found (high-comment)`);
+                      }
+                      if (
+                        sampleR === 'appended' ||
+                        sampleR === 'set' ||
+                        rowR === 'appended' ||
+                        rowR === 'set'
+                      ) {
+                        savePending = true;
+                      }
                     }
                   } else {
                     applied.set(e.testCode, false);

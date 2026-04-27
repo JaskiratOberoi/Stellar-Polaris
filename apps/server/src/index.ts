@@ -6,6 +6,8 @@ import cors from 'cors';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { registerRunRoutes, type RunState } from './routes/run.js';
+import { registerSchedulerRoutes } from './routes/scheduler.js';
+import { initScheduler } from './scheduler/scheduler.js';
 import { attachRunStreamWss } from './ws/runStream.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,8 @@ const runState: RunState = {
 };
 
 registerRunRoutes(app, runState);
+initScheduler(runState);
+registerSchedulerRoutes(app);
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });

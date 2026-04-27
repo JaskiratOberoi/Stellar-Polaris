@@ -37,6 +37,9 @@ export async function isRowAuthed(page: Page, patternSources: string[]): Promise
         if (!nameEl) continue;
         const raw = (nameEl.textContent || '').replace(/\u00A0/g, ' ').trim();
         if (!matchName(raw)) continue;
+        // Skip section/panel header rows (no value cell) — same rule as extractSidWorksheet.
+        const valueEl = row.querySelector("textarea[id*='txtValue'], input[id*='txtValue']");
+        if (!valueEl) continue;
         const auth = row.querySelector<HTMLInputElement>("input[type='checkbox'][id*='chkAuth']");
         return !!auth?.checked;
       }
@@ -46,7 +49,13 @@ export async function isRowAuthed(page: Page, patternSources: string[]): Promise
   );
 }
 
-export async function tickRowAuth(page: Page, patternSources: string[]): Promise<boolean> {
+/** `changed` is true when the row’s `chkAuth` was off and is now ticked. */
+export type TickRowAuthResult = { ok: boolean; changed: boolean };
+
+/**
+ * Ticks the worksheet row’s `chkAuth` for the first matching data row (skips section headers).
+ */
+export async function tickRowAuthResult(page: Page, patternSources: string[]): Promise<TickRowAuthResult> {
   return page.evaluate(
     (sources: string[]) => {
       const norm = (raw: string) =>
@@ -69,25 +78,32 @@ export async function tickRowAuth(page: Page, patternSources: string[]): Promise
         return false;
       };
       const table = document.querySelector("table[id*='gvWorksheet']");
-      if (!table) return false;
+      if (!table) return { ok: false, changed: false };
       const rows = Array.from(table.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
       for (const row of rows) {
         const nameEl = row.querySelector("span[id*='lblTestname']");
         if (!nameEl) continue;
         const raw = (nameEl.textContent || '').replace(/\u00A0/g, ' ').trim();
         if (!matchName(raw)) continue;
+        const valueEl = row.querySelector("textarea[id*='txtValue'], input[id*='txtValue']");
+        if (!valueEl) continue;
         const auth = row.querySelector<HTMLInputElement>("input[type='checkbox'][id*='chkAuth']");
-        if (!auth) return false;
-        if (auth.checked) return true;
+        if (!auth) return { ok: false, changed: false };
+        if (auth.checked) return { ok: true, changed: false };
         auth.click();
         auth.dispatchEvent(new Event('input', { bubbles: true }));
         auth.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
+        return { ok: true, changed: true };
       }
-      return false;
+      return { ok: false, changed: false };
     },
     patternSources
   );
+}
+
+export async function tickRowAuth(page: Page, patternSources: string[]): Promise<boolean> {
+  const r = await tickRowAuthResult(page, patternSources);
+  return r.ok;
 }
 
 export type SampleCommentResult = 'already' | 'appended' | 'set' | 'missing';
@@ -145,8 +161,10 @@ export async function ensureRowComment(
         if (!nameEl) continue;
         const raw = (nameEl.textContent || '').replace(/\u00A0/g, ' ').trim();
         if (!matchName(raw)) continue;
+        const valueEl = row.querySelector("textarea[id*='txtValue'], input[id*='txtValue']");
+        if (!valueEl) continue;
         const el = row.querySelector<HTMLTextAreaElement>("textarea[id*='txtComments']");
-        if (!el) return 'missing';
+        if (!el) continue;
         const cur = (el.value || '').trim();
         if (cur.includes(text)) return 'already';
         const next = cur ? `${cur}\n${text}` : text;

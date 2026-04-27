@@ -4,7 +4,8 @@ import { atLeastOneTestCodeOn, selectedTestCodesInOrder, TestCodeToggles } from 
 import { FiltersPanel } from './components/FiltersPanel';
 import { RunControls } from './components/RunControls';
 import { SidGrid, type SidEntry } from './components/SidGrid';
-import { getRunStatus, postRun, postStop } from './lib/api';
+import { getRunStatus, getScheduler, postRun, postStop, type SchedulerSnapshot } from './lib/api';
+import { SchedulerCard } from './components/SchedulerCard';
 import { connectRunWebSocket } from './lib/wsClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
 import { Label } from './components/ui/label';
@@ -27,13 +28,14 @@ function buildRunConfig(
   toDate: string,
   fromHour: string,
   toHour: string,
-  authenticate: boolean
+  authenticate: boolean,
+  headed: boolean
 ): RunConfig {
   const c: RunConfig = {
     testCodes,
     businessUnit: bu.trim() || 'QUGEN',
     statusLabels: statuses,
-    headless: true,
+    headless: !headed,
   };
   if (authenticate) c.authenticate = true;
   if (fromDate.trim()) c.fromDate = fromDate.trim();
@@ -65,6 +67,8 @@ export function App() {
     modalsSkipped: number;
   } | null>(null);
   const [authenticate, setAuthenticate] = useState(false);
+  const [headed, setHeaded] = useState(false);
+  const [schedulerRemote, setSchedulerRemote] = useState<SchedulerSnapshot | null>(null);
 
   const onWs = useCallback((ev: WsClientEvent) => {
     if (ev.type === 'LOG') {
@@ -135,6 +139,18 @@ export function App() {
       } else {
         setErr(null);
       }
+      return;
+    }
+    if (ev.type === 'SCHEDULER_STATE') {
+      setSchedulerRemote({
+        enabled: ev.enabled,
+        cooldownSeconds: ev.cooldownSeconds,
+        status: ev.status,
+        lastRunAt: ev.lastRunAt,
+        nextRunAt: ev.nextRunAt,
+        hasConfig: ev.hasConfig,
+        headless: ev.headless,
+      });
     }
   }, []);
 
@@ -206,14 +222,26 @@ export function App() {
       });
   }, []);
 
+  useEffect(() => {
+    getScheduler()
+      .then((s) => setSchedulerRemote(s))
+      .catch(() => {
+        /* dev server not up */
+      });
+  }, []);
+
   const canStart = useMemo(() => {
     return atLeastOneTestCodeOn(enabled) && statusSelection.length > 0;
   }, [enabled, statusSelection]);
 
+  const buildCurrentRunConfig = useCallback((): RunConfig => {
+    const testCodes = selectedTestCodesInOrder(enabled);
+    return buildRunConfig(testCodes, bu, statusSelection, fromDate, toDate, fromHour, toHour, authenticate, headed);
+  }, [enabled, bu, statusSelection, fromDate, toDate, fromHour, toHour, authenticate, headed]);
+
   const onStart = async () => {
     setErr(null);
-    const testCodes = selectedTestCodesInOrder(enabled);
-    const config = buildRunConfig(testCodes, bu, statusSelection, fromDate, toDate, fromHour, toHour, authenticate);
+    const config = buildCurrentRunConfig();
     try {
       const r = await postRun(config);
       setLastRunId(r.runId);
@@ -273,6 +301,18 @@ export function App() {
                 onCheckedChange={(v: boolean) => setAuthenticate(v)}
               />
             </div>
+            <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-4 py-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="headed" className="text-sm text-zinc-100">
+                  Show browser (headed)
+                </Label>
+                <p className="text-xs text-zinc-500">
+                  When on, runs Chromium in headed mode so you can watch the bot. Default is headless (faster). On a
+                  headless server without a display, leave this off.
+                </p>
+              </div>
+              <Switch id="headed" checked={headed} onCheckedChange={(v: boolean) => setHeaded(v)} />
+            </div>
             <div className="pt-4">
               <RunControls
                 running={running}
@@ -297,6 +337,12 @@ export function App() {
           toHour={toHour}
           onFromHour={setFromHour}
           onToHour={setToHour}
+        />
+
+        <SchedulerCard
+          buildConfig={buildCurrentRunConfig}
+          remote={schedulerRemote}
+          onError={(m) => setErr(m)}
         />
 
         <SidGrid entries={entries} skippedDedup={skippedDedup} summary={summary} />

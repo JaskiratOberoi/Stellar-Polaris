@@ -33,13 +33,38 @@ Open `http://localhost:5173`.
 
 The UI has **Authenticate (write mode)** (default: off). When off, the server still reads the modal, applies the B12 age-banded, Vit D unisex (5–100), and Total IgE (10–190) reference rules, and streams `SID_AUTH_DECISION` per test code with `writeMode: false` — **no** checkbox clicks, comments, or Save.
 
-**Total IgE:** if the modal contains an **ALLERGY PROFILE** row, Total IgE is not listed in that SID’s `tests` and no IgE auth decision is emitted (it is still marked resolved so a BI133-only pass does not re-open the same SID). Otherwise the bot may tick `chkAuth` on the IgE row in range, or append a high-out-of-range line to that row’s per-row **Comments** (`txtComments` — not the same field as the shared sample Comments used for B12 and Vit D).
+**Total IgE:** if the modal contains an **ALLERGY PROFILE** row, Total IgE is not listed in that SID’s `tests` and no IgE auth decision is emitted (it is still marked resolved so a BI133-only pass does not re-open the same SID). Otherwise the bot may tick `chkAuth` on the IgE row in range. For high-out-of-range values it ticks `chkAuth` on the same data row **and** appends the high-IgE line to that row’s per-row **Comments** (`txtComments` — not the same field as the shared sample Comments used for B12 and Vit D).
 
 **B12 / Vit D:** when the toggle is on, the bot may tick the matching row `chkAuth` (in-range). For high-out-of-range, it appends `? Supplement History` to the modal sample **Comments** (top right, at most once if both are high) and `Result Rechecked, kindly check with supplement history.` to that test’s per-row **Comments**; adds IgE per-row text when applicable, then **Save once** for the whole modal. This **changes live LIS data** — use dry runs first.
 
 **Auth gate:** the bot only automates SIDs whose worksheet (excluding panel headers) contains **only** Vitamin B12, or only Vitamin D, or B12 and Vit D together, or only Total IgE. If the modal has any other test row (e.g. LIPID PROFILE, LFT, ALLERGY PROFILE subtests), or if Total IgE appears **with** B12 and/or Vit D, it does not authenticate and emits `decision=skip` for each present enabled test with a reason. The web UI shows an **Auth gate** tag for those SIDs.
 
-`POST /api/run` may include `"authenticate": true` to mirror the UI (JSON body).
+`POST /api/run` may include `"authenticate": true` to mirror the UI (JSON body). Include `"headless": false` (or use the **Show browser (headed)** switch) to run Chromium in headed mode and watch the automation. Default is `headless: true`.
+
+### Background scheduler
+
+The **Background scheduler** card runs: **complete scan** → **cooldown** (seconds) → **repeat**, using the current filters, test code toggles, headed mode, and authenticate option you save. State is written to `apps/server/data/scheduler.json` (gitignored) and restored when the server starts; if a schedule was enabled, the loop starts again on boot.
+
+- **Save schedule** — persists settings and, with **Run continuously** on, starts (or restarts) the loop. With **Run continuously** off, it turns the scheduler off (same as **Disable**).
+- **Disable** — stops after the current run finishes; no new runs are queued.
+- A manual `POST /api/run` and the scheduler share a single in-flight run; if a scan is already running, the scheduler waits, then starts its cooldown after the run you care about ends.
+- **SCHEDULER_STATE** events on `/ws` carry status, last run time, and next run time for the UI.
+- On a headless server or any machine without a display, leave **Show browser (headed)** off; headed mode requires a real display (or a configured virtual one).
+
+### Audit logs (persistent)
+
+The server appends a non-volatile audit trail under `apps/server/data/logs/` (same `apps/server/data/` tree as the scheduler; **gitignored**, so it survives `git pull` and rebuilds and is not committed).
+
+| File | Purpose |
+| --- | --- |
+| `runs/<runId>.jsonl` | One JSON object per line: every event broadcast on `/ws` for that run (including `LOG` lines), in order. |
+| `runs/<runId>.summary.json` | Written when the run ends: `startedAt`, `endedAt`, `outcome` (`done` / `error` / `stopped`), optional `error`, and `summary` from the last `RUN_SUMMARY` if any. |
+| `decisions.csv` | Append-only, all runs: one row per `SID_AUTH_DECISION` (best file to grep or open in a spreadsheet: SID, test code, decision, reason, applied, save, write mode, age, sex, run id, timestamp). |
+| `scans.csv` | Append-only: one row per `SID_TEST_FOUND` and per `SID_SKIPPED`. Includes discovered-via test code/status, pipe-separated test codes found, auth-gate and allergy-profile flags where applicable, and a final `skipOrExtraReason` field (e.g. `already-resolved` for dedup skips). |
+| `scheduler.jsonl` | One JSON line per `SCHEDULER_STATE` broadcast (enable/disable, cooldown, status). |
+| `runs/orphan.jsonl` | Only if an event is recorded before a `RUN_STARTED` for the active run (should be rare / empty). |
+
+There is no automatic rotation in v1: archive or copy `data/logs` periodically if you need to cap size. Credentials are never written to these files (only WebSocket event payloads).
 
 ## Build + run server only
 

@@ -125,7 +125,18 @@ export type WsClientEvent =
     }
   | { type: 'RUN_DONE'; runId: string }
   | { type: 'RUN_ERROR'; runId: string; error: string }
-  | { type: 'RUN_STOPPED'; runId: string };
+  | { type: 'RUN_STOPPED'; runId: string }
+  | {
+      /** Emitted when the continuous scheduler’s settings or phase change. */
+      type: 'SCHEDULER_STATE';
+      enabled: boolean;
+      cooldownSeconds: number;
+      status: 'idle' | 'running' | 'cooling-down' | 'waiting-for-run' | 'disabled';
+      lastRunAt: number | null;
+      nextRunAt: number | null;
+      hasConfig: boolean;
+      headless: boolean;
+    };
 
 export interface ServerStatus {
   running: boolean;

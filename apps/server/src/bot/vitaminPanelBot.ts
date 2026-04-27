@@ -48,6 +48,7 @@ import {
   isRowAuthed,
   readPatientAgeSex,
   tickRowAuth,
+  tickRowAuthResult,
 } from './lis/auth.js';
 
 const MAX_GRID_PAGES = 500;
@@ -393,13 +394,19 @@ export async function runVitaminPanelScan(options: {
                     if (ok) savePending = true;
                   } else if (e.decision === 'high-comment') {
                     if (e.testCode === TOTAL_IGE) {
+                      const tick = await tickRowAuthResult(page, igeNamePatterns);
                       const r = await ensureRowComment(page, igeNamePatterns, IGE_HIGH_COMMENT);
-                      if (r === 'missing') {
+                      if (!tick.ok) {
+                        applied.set(e.testCode, false);
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: chkAuth not found (high IgE + comment)`);
+                      } else if (r === 'missing') {
                         applied.set(e.testCode, false);
                         log(emit, 'warn', `SID ${sid} ${e.testCode}: row Comments not found (high-comment)`);
                       } else {
                         applied.set(e.testCode, true);
-                        if (r === 'appended' || r === 'set') savePending = true;
+                        if (tick.changed || r === 'appended' || r === 'set') {
+                          savePending = true;
+                        }
                       }
                     } else {
                       const pats = e.testCode === B12 ? b12NamePatterns : vitDNamePatterns;

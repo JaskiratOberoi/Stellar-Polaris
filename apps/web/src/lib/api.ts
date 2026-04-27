@@ -1,4 +1,27 @@
-import type { RunConfig } from '@stellar/shared';
+import type { RunConfig, WsClientEvent } from '@stellar/shared';
+
+export type SchedulerSnapshot = Omit<Extract<WsClientEvent, { type: 'SCHEDULER_STATE' }>, 'type'>;
+
+export async function getScheduler(): Promise<SchedulerSnapshot> {
+  const res = await fetch('/api/scheduler');
+  if (!res.ok) throw new Error('Failed to load scheduler');
+  return (await res.json()) as SchedulerSnapshot;
+}
+
+export async function postScheduler(
+  body: { enabled: false } | { enabled: true; cooldownSeconds?: number; config: RunConfig }
+): Promise<SchedulerSnapshot & { ok: boolean }> {
+  const res = await fetch('/api/scheduler', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(j.error || res.statusText || 'Scheduler request failed');
+  }
+  return (await res.json()) as SchedulerSnapshot & { ok: boolean };
+}
 
 export async function postRun(config: RunConfig): Promise<{ runId: string; started: boolean }> {
   const res = await fetch('/api/run', {

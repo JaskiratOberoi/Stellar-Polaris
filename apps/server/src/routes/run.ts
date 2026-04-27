@@ -16,7 +16,31 @@ export type RunState = {
   controller: AbortController | null;
 };
 
-function validateRunConfig(body: unknown): { ok: true; config: RunConfig } | { ok: false; error: string } {
+const runEndListeners = new Set<() => void>();
+
+/** Called from `launchRun` `finally` so the scheduler can re-kick after manual runs. */
+function notifyRunEnd(): void {
+  for (const fn of runEndListeners) {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Register a callback invoked whenever a run fully completes (normal end, error, or stopped).
+ * Used by the continuous scheduler to retry `kickLoop` when a user-triggered run finishes.
+ */
+export function subscribeRunEnd(fn: () => void): () => void {
+  runEndListeners.add(fn);
+  return () => {
+    runEndListeners.delete(fn);
+  };
+}
+
+export function validateRunConfig(body: unknown): { ok: true; config: RunConfig } | { ok: false; error: string } {
   if (!body || typeof body !== 'object') {
     return { ok: false, error: 'Expected JSON object body' };
   }
@@ -78,6 +102,63 @@ function parseHour(v: unknown): number | null | undefined {
   return n;
 }
 
+/**
+ * Synchronously marks a run as started and broadcasts `RUN_STARTED`. Pair with
+ * `executeRun` (or `launchRun` which does both) so the HTTP response can return a real `runId`.
+ */
+export function beginRun(state: RunState): string {
+  if (state.running) {
+    throw new Error('beginRun: run already in progress');
+  }
+  const runId = randomUUID();
+  const controller = new AbortController();
+  state.running = true;
+  state.runId = runId;
+  state.startedAt = Date.now();
+  state.controller = controller;
+  broadcastRunEvent({ type: 'RUN_STARTED', runId });
+  return runId;
+}
+
+/**
+ * Runs the bot for an already-begun run. Clears `state` and notifies run-end listeners in `finally`.
+ */
+export async function executeRun(state: RunState, runId: string, config: RunConfig): Promise<void> {
+  if (state.runId !== runId || !state.controller) {
+    throw new Error('executeRun: state does not match runId or controller is missing');
+  }
+  const signal = state.controller.signal;
+  const emit = (ev: Parameters<typeof broadcastRunEvent>[0]) => broadcastRunEvent(ev);
+  try {
+    await runVitaminPanelScan({ runId, config, signal, emit });
+    if (signal.aborted) {
+      broadcastRunEvent({ type: 'RUN_STOPPED', runId });
+    } else {
+      broadcastRunEvent({ type: 'RUN_DONE', runId });
+    }
+  } catch (e) {
+    const err = e instanceof Error ? e.message : String(e);
+    broadcastRunEvent({ type: 'RUN_ERROR', runId, error: err });
+    console.error(e);
+  } finally {
+    state.running = false;
+    state.runId = null;
+    state.startedAt = null;
+    state.controller = null;
+    notifyRunEnd();
+  }
+}
+
+/**
+ * `beginRun` + `await executeRun` — for the scheduler; do not use when you need to
+ * send `runId` in the same HTTP response as `POST /api/run` (use `beginRun` + `void executeRun` there).
+ */
+export async function launchRun(state: RunState, config: RunConfig): Promise<string> {
+  const runId = beginRun(state);
+  await executeRun(state, runId, config);
+  return runId;
+}
+
 export function registerRunRoutes(app: Express, state: RunState): void {
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ ok: true });
@@ -109,39 +190,10 @@ export function registerRunRoutes(app: Express, state: RunState): void {
       res.status(400).json({ error: v.error });
       return;
     }
-    const runId = randomUUID();
-    const controller = new AbortController();
-    state.running = true;
-    state.runId = runId;
-    state.startedAt = Date.now();
-    state.controller = controller;
-
-    broadcastRunEvent({ type: 'RUN_STARTED', runId });
-    res.json({ runId, started: true });
-
     const config = v.config;
-    const signal = controller.signal;
-    const emit = (ev: Parameters<typeof broadcastRunEvent>[0]) => broadcastRunEvent(ev);
-
-    void (async () => {
-      try {
-        await runVitaminPanelScan({ runId, config, signal, emit });
-        if (signal.aborted) {
-          broadcastRunEvent({ type: 'RUN_STOPPED', runId });
-        } else {
-          broadcastRunEvent({ type: 'RUN_DONE', runId });
-        }
-      } catch (e) {
-        const err = e instanceof Error ? e.message : String(e);
-        broadcastRunEvent({ type: 'RUN_ERROR', runId, error: err });
-        console.error(e);
-      } finally {
-        state.running = false;
-        state.runId = null;
-        state.startedAt = null;
-        state.controller = null;
-      }
-    })();
+    const runId = beginRun(state);
+    res.json({ runId, started: true });
+    void executeRun(state, runId, config);
   });
 
   app.post('/api/stop', (_req: Request, res: Response) => {

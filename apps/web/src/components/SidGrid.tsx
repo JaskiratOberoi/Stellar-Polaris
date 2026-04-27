@@ -182,7 +182,7 @@ function AuthGateBadge({ reason }: { reason?: string }) {
       <span className="font-medium">Auth gate</span>
       <span className="text-amber-400/90">·</span>
       <span>skip</span>
-      <span className="text-amber-300/80">· other tests / mixed panel</span>
+      <span className="text-amber-300/80">· other tests present / mixed panel</span>
     </span>
   );
 }

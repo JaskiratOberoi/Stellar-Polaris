@@ -13,6 +13,9 @@ import { Switch } from './components/ui/switch';
 
 const initialEnabled: Record<TestCodeId, boolean> = { BI235: true, BI005: true, BI133: true };
 
+/** Max SIDs kept in the grid to avoid unbounded memory on long runs. */
+const MAX_SID_ENTRIES = 2000;
+
 function parseHourField(s: string): number | null | undefined {
   if (!s.trim()) return undefined;
   const n = Number(s);
@@ -84,8 +87,8 @@ export function App() {
       return;
     }
     if (ev.type === 'SID_TEST_FOUND') {
-      setEntries((prev) =>
-        upsertSidEntry(
+      setEntries((prev) => {
+        const out = upsertSidEntry(
           prev,
           ev.sid,
           ev.discoveredViaTestCode,
@@ -96,8 +99,12 @@ export function App() {
           ev.suppressedTotalIgEUnit,
           ev.authGateSkipped,
           ev.authGateReason
-        )
-      );
+        );
+        if (out.length > MAX_SID_ENTRIES) {
+          return out.slice(-MAX_SID_ENTRIES);
+        }
+        return out;
+      });
       return;
     }
     if (ev.type === 'SID_AUTH_DECISION') {
@@ -345,7 +352,12 @@ export function App() {
           onError={(m) => setErr(m)}
         />
 
-        <SidGrid entries={entries} skippedDedup={skippedDedup} summary={summary} />
+        <SidGrid
+          entries={entries}
+          skippedDedup={skippedDedup}
+          summary={summary}
+          atCapacity={entries.length >= MAX_SID_ENTRIES}
+        />
 
         <Card>
           <CardHeader>

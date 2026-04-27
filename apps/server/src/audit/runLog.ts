@@ -27,12 +27,45 @@ type RunCtx = { stream: WriteStream; startedAt: number };
 const runStreams = new Map<string, RunCtx>();
 const lastSummary = new Map<string, { uniqueSids: number; modalsOpened: number; modalsSkipped: number }>();
 let activeRunId: string | null = null;
-let decisionsHeader = false;
-let scansHeader = false;
+let decisionsStream: WriteStream | null = null;
+let scansStream: WriteStream | null = null;
+let schedulerLogStream: WriteStream | null = null;
 let orphanStream: WriteStream | null = null;
 
 function runJsonlPath(runId: string): string {
   return path.join(RUNS_DIR, `${runId}.jsonl`);
+}
+
+function getDecisionsStream(): WriteStream {
+  ensure();
+  if (!decisionsStream) {
+    const needHeader = !fs.existsSync(DECISIONS_CSV) || fs.statSync(DECISIONS_CSV).size === 0;
+    decisionsStream = fs.createWriteStream(DECISIONS_CSV, { flags: 'a' });
+    if (needHeader) {
+      appendLine(decisionsStream, DECISIONS_HEADER);
+    }
+  }
+  return decisionsStream;
+}
+
+function getScansStream(): WriteStream {
+  ensure();
+  if (!scansStream) {
+    const needHeader = !fs.existsSync(SCANS_CSV) || fs.statSync(SCANS_CSV).size === 0;
+    scansStream = fs.createWriteStream(SCANS_CSV, { flags: 'a' });
+    if (needHeader) {
+      appendLine(scansStream, SCANS_HEADER);
+    }
+  }
+  return scansStream;
+}
+
+function getSchedulerLogStream(): WriteStream {
+  ensure();
+  if (!schedulerLogStream) {
+    schedulerLogStream = fs.createWriteStream(SCHEDULER_JSONL, { flags: 'a' });
+  }
+  return schedulerLogStream;
 }
 
 function getOrphanStream(): WriteStream {
@@ -58,22 +91,6 @@ function csvCell(v: string | number | boolean | null | undefined): string {
   return s;
 }
 
-function ensureDecisionsHeader(): void {
-  if (decisionsHeader) return;
-  if (!fs.existsSync(DECISIONS_CSV) || fs.statSync(DECISIONS_CSV).size === 0) {
-    fs.appendFileSync(DECISIONS_CSV, DECISIONS_HEADER + '\n', 'utf8');
-  }
-  decisionsHeader = true;
-}
-
-function ensureScansHeader(): void {
-  if (scansHeader) return;
-  if (!fs.existsSync(SCANS_CSV) || fs.statSync(SCANS_CSV).size === 0) {
-    fs.appendFileSync(SCANS_CSV, SCANS_HEADER + '\n', 'utf8');
-  }
-  scansHeader = true;
-}
-
 function writeRunJsonl(runId: string, line: string, allowOrphan: boolean): void {
   const ctx = runStreams.get(runId);
   if (ctx) {
@@ -81,6 +98,36 @@ function writeRunJsonl(runId: string, line: string, allowOrphan: boolean): void 
   } else if (allowOrphan) {
     appendLine(getOrphanStream(), line);
   }
+}
+
+/**
+ * Best-effort close of audit streams. Safe to call on SIGINT / SIGTERM before process exit.
+ */
+export function flushAuditLogs(): void {
+  for (const rid of [...runStreams.keys()]) {
+    const ctx = runStreams.get(rid);
+    if (!ctx) continue;
+    try {
+      ctx.stream.end();
+    } catch {
+      /* ignore */
+    }
+    runStreams.delete(rid);
+  }
+  activeRunId = null;
+  for (const s of [decisionsStream, scansStream, schedulerLogStream, orphanStream]) {
+    if (s) {
+      try {
+        s.end();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  decisionsStream = null;
+  scansStream = null;
+  schedulerLogStream = null;
+  orphanStream = null;
 }
 
 /**
@@ -93,7 +140,10 @@ export function recordEvent(ev: WsClientEvent): void {
     ensure();
 
     if (ev.type === 'SCHEDULER_STATE') {
-      fs.appendFileSync(SCHEDULER_JSONL, JSON.stringify({ ...ev, _receivedAt: Date.now() }) + '\n', 'utf8');
+      appendLine(
+        getSchedulerLogStream(),
+        JSON.stringify({ ...ev, _receivedAt: Date.now() })
+      );
       return;
     }
 
@@ -140,7 +190,6 @@ export function recordEvent(ev: WsClientEvent): void {
     }
 
     if (ev.type === 'SID_AUTH_DECISION') {
-      ensureDecisionsHeader();
       const ts = new Date().toISOString();
       const row = [
         ts,
@@ -157,11 +206,10 @@ export function recordEvent(ev: WsClientEvent): void {
       ]
         .map((c) => csvCell(c))
         .join(',');
-      fs.appendFileSync(DECISIONS_CSV, row + '\n', 'utf8');
+      appendLine(getDecisionsStream(), row);
     }
 
     if (ev.type === 'SID_TEST_FOUND') {
-      ensureScansHeader();
       const ts = new Date().toISOString();
       const testCodes: TestCodeId[] = ev.tests.map((t) => t.testCode);
       const testCodesPresent = testCodes.join('|');
@@ -182,11 +230,10 @@ export function recordEvent(ev: WsClientEvent): void {
       ]
         .map((c) => csvCell(c))
         .join(',');
-      fs.appendFileSync(SCANS_CSV, row + '\n', 'utf8');
+      appendLine(getScansStream(), row);
     }
 
     if (ev.type === 'SID_SKIPPED') {
-      ensureScansHeader();
       const ts = new Date().toISOString();
       const row = [
         ts,
@@ -205,7 +252,7 @@ export function recordEvent(ev: WsClientEvent): void {
       ]
         .map((c) => csvCell(c))
         .join(',');
-      fs.appendFileSync(SCANS_CSV, row + '\n', 'utf8');
+      appendLine(getScansStream(), row);
     }
 
     if (ev.type === 'RUN_DONE' || ev.type === 'RUN_ERROR' || ev.type === 'RUN_STOPPED') {

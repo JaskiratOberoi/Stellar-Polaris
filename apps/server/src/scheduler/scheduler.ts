@@ -13,7 +13,7 @@ let persisted: SchedulerPersisted = loadScheduler();
 let blockedByOtherRun = false;
 let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
 let nextRunAt: number | null = null;
-let kickChain: Promise<void> = Promise.resolve();
+let kickPending = false;
 let runEndUnsub: (() => void) | null = null;
 
 function headlessFromConfig(c: RunConfig | null | undefined): boolean {
@@ -79,11 +79,17 @@ function scheduleCooldownAndEmit(): void {
 }
 
 function enqueueKick(): void {
-  kickChain = kickChain
-    .then(() => kickLoop())
-    .catch((e) => {
+  if (kickPending) return;
+  kickPending = true;
+  queueMicrotask(async () => {
+    try {
+      await kickLoop();
+    } catch (e) {
       console.error('[stellar] scheduler kickLoop', e);
-    });
+    } finally {
+      kickPending = false;
+    }
+  });
 }
 
 async function kickLoop(): Promise<void> {

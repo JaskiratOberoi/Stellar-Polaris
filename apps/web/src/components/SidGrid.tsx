@@ -25,6 +25,8 @@ export type SidGridProps = {
   entries: SidEntry[];
   skippedDedup: number;
   summary: { uniqueSids: number; modalsOpened: number; modalsSkipped: number } | null;
+  /** When true, the list is at the UI cap (oldest SIDs may have been dropped). */
+  atCapacity?: boolean;
   className?: string;
 };
 
@@ -217,7 +219,7 @@ function AllergyProfileIgEBadge({
   );
 }
 
-export function SidGrid({ entries, skippedDedup, summary, className }: SidGridProps) {
+export function SidGrid({ entries, skippedDedup, summary, atCapacity, className }: SidGridProps) {
   if (entries.length === 0) {
     return (
       <Card className={cn('border-dashed border-zinc-700', className)}>
@@ -246,6 +248,9 @@ export function SidGrid({ entries, skippedDedup, summary, className }: SidGridPr
             Run summary: {summary.uniqueSids} unique SID(s), {summary.modalsOpened} modal(s) opened,{' '}
             {summary.modalsSkipped} skipped via dedup.
           </p>
+        ) : null}
+        {atCapacity ? (
+          <p className="text-xs text-zinc-500">Showing latest 2000 SIDs in this view; older rows are dropped.</p>
         ) : null}
       </CardHeader>
       <CardContent>

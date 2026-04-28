@@ -1,21 +1,25 @@
-import { B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
+import { ANTI_CCP, B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
 import { TEST_CODE_NAME_PATTERNS } from './testCodeMatchers.js';
 
-/** Per-row B12 / Vit D Comments (`txtComments`) when value is out of range high. */
+/** Inline (per-test row) B12 / Vit D Comments — `txtComments` — when value is out of range high. */
 export const HIGH_COMMENT = 'Result Rechecked, kindly check with supplement history.';
 
-/** Modal-level sample Comments box (top right, `txtSampleComments`) for B12 / Vit D high. */
+/** Hold (modal top-right) Comments — `txtSampleComments` — for B12 / Vit D high. */
 export const SUPPLEMENT_HISTORY_PROMPT = '? Supplement History';
 
 export const IGE_HIGH_COMMENT =
   'Result Rechecked, kindly correlate clinically. Advice: Allergy Profile.';
 
-export const PROLACTIN_ROW_COMMENT =
+export const PROLACTIN_INLINE_COMMENT =
   'RESULTS RECHECKED. KINDLY CORRELATE CLINICALLY AND WITH TIME OF SAMPLE COLLECTION (Refer to Note)';
 
-export const PROLACTIN_HISTORY_PROMPT = '? History for Prolactin';
+export const PROLACTIN_HOLD_COMMENT = '? History for Prolactin';
 
 export const PROLACTIN_HIGH_THRESHOLD = 40;
+
+export const ANTI_CCP_INLINE_COMMENT = 'Result Rechecked, Kindly correlate clinically.';
+export const ANTI_CCP_HOLD_COMMENT = '? History';
+export const ANTI_CCP_HIGH_THRESHOLD = 17.0;
 
 export type B12Decision =
   | { kind: 'auth'; reason: string }
@@ -63,7 +67,7 @@ export function igENamePatternSources(): string[] {
   return TEST_CODE_NAME_PATTERNS[TOTAL_IGE].map((r) => r.source);
 }
 
-/** 0-100y reference 10-190. Per-row `txtComments` (not `txtSampleComments`) on high. */
+/** 0-100y reference 10-190. Inline `txtComments` (not hold `txtSampleComments`) on high. */
 export function decideTotalIgE(rawValue: string | null): IgEDecision {
   const lower = 10;
   const upper = 190;
@@ -79,7 +83,7 @@ export function decideTotalIgE(rawValue: string | null): IgEDecision {
 
 export type ProlactinDecision =
   | { kind: 'auth'; reason: string }
-  /** Above sex/age upper but <= 40: tick chkAuth and add PROLACTIN_ROW_COMMENT. */
+  /** Above sex/age upper but <= 40: tick chkAuth and add `PROLACTIN_INLINE_COMMENT` (per-test inline). */
   | { kind: 'auth-with-note'; reason: string }
   | { kind: 'high-comment'; reason: string }
   | { kind: 'defer'; reason: string }
@@ -98,8 +102,8 @@ export const PROLACTIN_COMPANION_PATTERN_SOURCES: string[] = [
 
 /**
  * F 18–＜45y: 2.8–29.2; F 45–60y: 1.8–29.2; M 18–60y: 2.1–17.7.
- * Value &gt; 40 → high-comment (top-right sample `? History for Prolactin` only, no auth tick, no row comment).
- * Within [lower, upper] → auth (tick only). Between upper and 40 → auth-with-note (tick + row comment).
+ * Value &gt; 40 → high-comment: write mode sets hold `PROLACTIN_HOLD_COMMENT` and row `PROLACTIN_INLINE_COMMENT` (no chkAuth).
+ * Within [lower, upper] → auth (tick only). Between upper and 40 → auth-with-note (tick + `PROLACTIN_INLINE_COMMENT`).
  */
 export function decideProlactin(
   rawValue: string | null,
@@ -158,6 +162,30 @@ export function decideProlactin(
     kind: 'auth',
     reason: `value ${n} within ${lower}-${upper} (sex ${sex}, age ${years.toFixed(1)}y)`,
   };
+}
+
+export type AntiCcpDecision =
+  | { kind: 'auth'; reason: string }
+  | { kind: 'high-comment'; reason: string }
+  | { kind: 'defer'; reason: string }
+  | { kind: 'skip'; reason: string };
+
+export function antiCcpNamePatternSources(): string[] {
+  return TEST_CODE_NAME_PATTERNS[ANTI_CCP].map((r) => r.source);
+}
+
+export function decideAntiCcp(rawValue: string | null): AntiCcpDecision {
+  const v = (rawValue ?? '').trim();
+  if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
+  if (/[<>]/.test(v)) {
+    return { kind: 'skip', reason: `value '${v}' contains '<' or '>' (manual review)` };
+  }
+  const n = Number(String(v).replace(/,/g, ''));
+  if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (n >= ANTI_CCP_HIGH_THRESHOLD) {
+    return { kind: 'high-comment', reason: `value ${n} >= ${ANTI_CCP_HIGH_THRESHOLD}` };
+  }
+  return { kind: 'auth', reason: `value ${n} < ${ANTI_CCP_HIGH_THRESHOLD}` };
 }
 
 /**

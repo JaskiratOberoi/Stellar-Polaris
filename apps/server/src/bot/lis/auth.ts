@@ -108,7 +108,11 @@ export async function tickRowAuth(page: Page, patternSources: string[]): Promise
 
 export type SampleCommentResult = 'already' | 'appended' | 'set' | 'missing';
 
-export async function ensureSampleComment(page: Page, line: string): Promise<SampleCommentResult> {
+/**
+ * Appends a line to the **hold** Comments field (modal-level, top right, `txtSampleComments`).
+ * LIS shows this as "Comments" — we call it "hold" in code to distinguish from per-row inline comments.
+ */
+export async function ensureHoldComment(page: Page, line: string): Promise<SampleCommentResult> {
   return page.evaluate((text: string) => {
     const el = document.querySelector<HTMLTextAreaElement>("textarea[id*='txtSampleComments']");
     if (!el) return 'missing';
@@ -123,10 +127,11 @@ export async function ensureSampleComment(page: Page, line: string): Promise<Sam
 }
 
 /**
- * Per-row Comments (`txtComments` in the grid row), e.g. Total IgE high-result note.
- * Does not use the modal-level `txtSampleComments` textarea.
+ * Appends a line to the **inline** Comments field for a matched test row (`txtComments` in `gvWorksheet`),
+ * e.g. Total IgE high note or Prolactin borderline note. LIS shows this in the per-test "Comments" column;
+ * we call it "inline" in code. Does not touch the hold `txtSampleComments` area.
  */
-export async function ensureRowComment(
+export async function ensureInlineComment(
   page: Page,
   patternSources: string[],
   line: string

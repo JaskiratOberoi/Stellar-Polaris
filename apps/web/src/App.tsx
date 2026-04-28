@@ -24,6 +24,7 @@ const initialEnabled: Record<TestCodeId, boolean> = {
   BI005: true,
   BI133: true,
   BI180: true,
+  BI036: true,
 };
 
 /** Client-side cap so the DOM stays bounded; server retains up to its own limit in `sids/active.jsonl`. */
@@ -313,7 +314,10 @@ export function App() {
     <div className="mx-auto min-h-screen max-w-4xl p-6 pb-16">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">Stellar Polaris</h1>
-        <p className="text-sm text-zinc-400">Vitamin B12, Vitamin D, and Total IgE worksheet SID results (LIS sample grid + modal rows).</p>
+        <p className="text-sm text-zinc-400">
+          Vitamin B12, Vitamin D, Total IgE, Prolactin, and Anti-CCP worksheet SID results (LIS sample grid + modal
+          rows).
+        </p>
         <p className="mt-1 text-xs text-zinc-500">LIS login uses credentials from the server <code className="text-zinc-400">.env</code> only (e.g. <code className="text-zinc-400">LIS_USERNAME</code> / <code className="text-zinc-400">LIS_PASSWORD</code>).</p>
         {lastRunId && <p className="mt-2 text-xs text-zinc-500">Run id: {lastRunId}</p>}
         {err && <p className="mt-2 text-sm text-red-400">Error: {err}</p>}
@@ -325,8 +329,8 @@ export function App() {
           <CardHeader>
             <CardTitle>Test codes</CardTitle>
             <CardDescription>
-              Enable any combination. The bot processes enabled codes in order: BI235, then BI005, then BI133,
-              then BI180.
+              Enable any combination. The bot processes enabled codes in order: BI235, then BI005, then BI133, then
+              BI180, then BI036.
             </CardDescription>
           </CardHeader>
           <CardContent>

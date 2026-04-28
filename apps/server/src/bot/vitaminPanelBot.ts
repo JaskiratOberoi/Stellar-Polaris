@@ -29,7 +29,11 @@ import {
 } from './lis/sidWorksheet.js';
 import { matchTestCode, normalizeTestName } from '../config/testCodeMatchers.js';
 import {
+  ANTI_CCP_HOLD_COMMENT,
+  ANTI_CCP_INLINE_COMMENT,
+  antiCcpNamePatternSources,
   b12NamePatternSources,
+  decideAntiCcp,
   decideB12,
   decideProlactin,
   decideTotalIgE,
@@ -38,18 +42,18 @@ import {
   IGE_HIGH_COMMENT,
   igENamePatternSources,
   PROLACTIN_COMPANION_PATTERN_SOURCES,
-  PROLACTIN_HISTORY_PROMPT,
-  PROLACTIN_ROW_COMMENT,
+  PROLACTIN_HOLD_COMMENT,
+  PROLACTIN_INLINE_COMMENT,
   prolactinNamePatternSources,
   SUPPLEMENT_HISTORY_PROMPT,
   parseAgeSex,
   vitDNamePatternSources,
 } from '../config/authRules.js';
-import { B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
+import { ANTI_CCP, B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
 import {
   clickSaveAndSettle,
-  ensureRowComment,
-  ensureSampleComment,
+  ensureHoldComment,
+  ensureInlineComment,
   isRowAuthed,
   readPatientAgeSex,
   tickRowAuth,
@@ -187,8 +191,9 @@ export async function runVitaminPanelScan(options: {
     const vitDNamePatterns = vitDNamePatternSources();
     const igeNamePatterns = igENamePatternSources();
     const prolactinNamePatterns = prolactinNamePatternSources();
+    const antiCcpNamePatterns = antiCcpNamePatternSources();
     const companionRe = PROLACTIN_COMPANION_PATTERN_SOURCES.map((s) => new RegExp(s, 'i'));
-    /** SIDs whose Prolactin decision is auth-with-note (upper–40 band) — tick + row comment in write mode. */
+    /** SIDs whose Prolactin decision is auth-with-note (upper–40 band) — tick + inline comment in write mode. */
     const prolactinNeedsNote = new Set<string>();
     let modalsOpened = 0;
     let modalsSkipped = 0;
@@ -289,7 +294,10 @@ export async function runVitaminPanelScan(options: {
               const prolactinMixed =
                 eligibleSet.has(PROLACTIN) &&
                 (eligibleSet.has(B12) || eligibleSet.has(VITAMIN_D) || eligibleSet.has(TOTAL_IGE));
-              const gateBlocked = hasOtherTests || igeMixed || prolactinMixed;
+              const antiCcpPresent = eligibleSet.has(ANTI_CCP);
+              const antiCcpHasCompanions =
+                antiCcpPresent && (eligibleSet.size > 1 || otherTestRowsRaw.length > 0);
+              const gateBlocked = hasOtherTests || igeMixed || prolactinMixed || antiCcpHasCompanions;
               const gateReason = hasOtherTests
                 ? (() => {
                     const names = [...new Set(otherTestRows.map((r) => r.rawName))];
@@ -300,7 +308,9 @@ export async function runVitaminPanelScan(options: {
                   })()
                 : igeMixed
                   ? 'auth gate: IgE cannot be authenticated alongside B12 or Vit D (manual review)'
-                  : 'auth gate: Prolactin cannot be authenticated alongside B12 / Vit D / IgE (manual review)';
+                  : prolactinMixed
+                    ? 'auth gate: Prolactin cannot be authenticated alongside B12 / Vit D / IgE (manual review)'
+                    : 'auth gate: Anti-CCP must be the only test in the worksheet (manual review)';
 
               const needB12Auth = enabledCodes.has(B12) && deduped.some((t) => t.testCode === B12);
               const needVitDAuth = enabledCodes.has(VITAMIN_D) && deduped.some((t) => t.testCode === VITAMIN_D);
@@ -308,12 +318,17 @@ export async function runVitaminPanelScan(options: {
                 enabledCodes.has(TOTAL_IGE) && deduped.some((t) => t.testCode === TOTAL_IGE);
               const needProlactinAuth =
                 enabledCodes.has(PROLACTIN) && deduped.some((t) => t.testCode === PROLACTIN);
+              const needAntiCcpAuth =
+                enabledCodes.has(ANTI_CCP) && deduped.some((t) => t.testCode === ANTI_CCP);
 
               type AuthEval = { testCode: TestCodeId; decision: B12AuthKind; reason: string };
               const evals: AuthEval[] = [];
               let ageMonths: number | null = null;
               let sex: 'M' | 'F' | null = null;
-              if (!gateBlocked && (needB12Auth || needVitDAuth || needIgEAuth || needProlactinAuth)) {
+              if (
+                !gateBlocked &&
+                (needB12Auth || needVitDAuth || needIgEAuth || needProlactinAuth || needAntiCcpAuth)
+              ) {
                 const ageText = await readPatientAgeSex(page);
                 const parsed = parseAgeSex(ageText);
                 ageMonths = parsed.ageMonths;
@@ -331,6 +346,9 @@ export async function runVitaminPanelScan(options: {
                 }
                 if (needProlactinAuth) {
                   evals.push({ testCode: PROLACTIN, decision: 'skip', reason: gateReason });
+                }
+                if (needAntiCcpAuth) {
+                  evals.push({ testCode: ANTI_CCP, decision: 'skip', reason: gateReason });
                 }
                 if (evals.length > 0) log(emit, 'warn', `SID ${sid}: ${gateReason}`);
               } else {
@@ -403,6 +421,27 @@ export async function runVitaminPanelScan(options: {
                     }
                   }
                 }
+                if (needAntiCcpAuth) {
+                  const ccpHit = deduped.find((t) => t.testCode === ANTI_CCP)!;
+                  if (await isRowAuthed(page, antiCcpNamePatterns)) {
+                    evals.push({
+                      testCode: ANTI_CCP,
+                      decision: 'already-authed',
+                      reason: 'Anti-CCP row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideAntiCcp(ccpHit.value);
+                    const decision = planKindToAuth(d);
+                    evals.push({ testCode: ANTI_CCP, decision, reason: d.reason });
+                    if (decision === 'high-comment' || decision === 'skip') {
+                      log(
+                        emit,
+                        'warn',
+                        `SID ${sid} Anti-CCP (BI036): ${decision} — ${d.reason} (manual review)`
+                      );
+                    }
+                  }
+                }
               }
               for (const e of evals) {
                 if (e.decision === 'defer') acc.delete(e.testCode);
@@ -444,10 +483,10 @@ export async function runVitaminPanelScan(options: {
                         applied.set(e.testCode, false);
                         log(emit, 'warn', `SID ${sid} ${e.testCode}: chkAuth not found (Prolactin auth)`);
                       } else if (prolactinNeedsNote.has(sid)) {
-                        const r = await ensureRowComment(page, prolactinNamePatterns, PROLACTIN_ROW_COMMENT);
+                        const r = await ensureInlineComment(page, prolactinNamePatterns, PROLACTIN_INLINE_COMMENT);
                         if (r === 'missing') {
                           applied.set(e.testCode, false);
-                          log(emit, 'warn', `SID ${sid} ${e.testCode}: row Comments not found (Prolactin auth-with-note)`);
+                          log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (Prolactin auth-with-note)`);
                         } else {
                           applied.set(e.testCode, true);
                           if (tick.changed || r === 'appended' || r === 'set') {
@@ -466,7 +505,9 @@ export async function runVitaminPanelScan(options: {
                           ? b12NamePatterns
                           : e.testCode === VITAMIN_D
                             ? vitDNamePatterns
-                            : igeNamePatterns;
+                            : e.testCode === TOTAL_IGE
+                              ? igeNamePatterns
+                              : antiCcpNamePatterns;
                       const ok = await tickRowAuth(page, pats);
                       applied.set(e.testCode, ok);
                       if (ok) savePending = true;
@@ -474,13 +515,13 @@ export async function runVitaminPanelScan(options: {
                   } else if (e.decision === 'high-comment') {
                     if (e.testCode === TOTAL_IGE) {
                       const tick = await tickRowAuthResult(page, igeNamePatterns);
-                      const r = await ensureRowComment(page, igeNamePatterns, IGE_HIGH_COMMENT);
+                      const r = await ensureInlineComment(page, igeNamePatterns, IGE_HIGH_COMMENT);
                       if (!tick.ok) {
                         applied.set(e.testCode, false);
                         log(emit, 'warn', `SID ${sid} ${e.testCode}: chkAuth not found (high IgE + comment)`);
                       } else if (r === 'missing') {
                         applied.set(e.testCode, false);
-                        log(emit, 'warn', `SID ${sid} ${e.testCode}: row Comments not found (high-comment)`);
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (high-comment)`);
                       } else {
                         applied.set(e.testCode, true);
                         if (tick.changed || r === 'appended' || r === 'set') {
@@ -488,31 +529,74 @@ export async function runVitaminPanelScan(options: {
                         }
                       }
                     } else if (e.testCode === PROLACTIN) {
-                      // >40: top-right `txtSampleComments` only; no per-row `txtComments`, no chkAuth.
-                      const sampleR = await ensureSampleComment(page, PROLACTIN_HISTORY_PROMPT);
-                      const sampleOk = sampleR !== 'missing';
-                      applied.set(e.testCode, sampleOk);
-                      if (!sampleOk) {
-                        log(
-                          emit,
-                          'warn',
-                          `SID ${sid} ${e.testCode}: sample Comments not found (Prolactin >40)`
-                        );
-                      } else if (sampleR === 'appended' || sampleR === 'set') {
-                        savePending = true;
-                      }
-                    } else {
-                      const pats = e.testCode === B12 ? b12NamePatterns : vitDNamePatterns;
-                      const sampleR = await ensureSampleComment(page, SUPPLEMENT_HISTORY_PROMPT);
-                      const rowR = await ensureRowComment(page, pats, HIGH_COMMENT);
+                      // >40: hold + per-test inline; no chkAuth.
+                      const sampleR = await ensureHoldComment(page, PROLACTIN_HOLD_COMMENT);
+                      const rowR = await ensureInlineComment(
+                        page,
+                        prolactinNamePatterns,
+                        PROLACTIN_INLINE_COMMENT
+                      );
                       const sampleOk = sampleR !== 'missing';
                       const rowOk = rowR !== 'missing';
                       applied.set(e.testCode, sampleOk && rowOk);
                       if (!sampleOk) {
-                        log(emit, 'warn', `SID ${sid} ${e.testCode}: sample Comments not found (high-comment)`);
+                        log(
+                          emit,
+                          'warn',
+                          `SID ${sid} ${e.testCode}: hold Comments not found (Prolactin >40)`
+                        );
                       }
                       if (!rowOk) {
-                        log(emit, 'warn', `SID ${sid} ${e.testCode}: row Comments not found (high-comment)`);
+                        log(
+                          emit,
+                          'warn',
+                          `SID ${sid} ${e.testCode}: inline Comments not found (Prolactin >40)`
+                        );
+                      }
+                      if (
+                        sampleR === 'appended' ||
+                        sampleR === 'set' ||
+                        rowR === 'appended' ||
+                        rowR === 'set'
+                      ) {
+                        savePending = true;
+                      }
+                    } else if (e.testCode === ANTI_CCP) {
+                      const sampleR = await ensureHoldComment(page, ANTI_CCP_HOLD_COMMENT);
+                      const rowR = await ensureInlineComment(
+                        page,
+                        antiCcpNamePatterns,
+                        ANTI_CCP_INLINE_COMMENT
+                      );
+                      const sampleOk = sampleR !== 'missing';
+                      const rowOk = rowR !== 'missing';
+                      applied.set(e.testCode, sampleOk && rowOk);
+                      if (!sampleOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: hold Comments not found (Anti-CCP high)`);
+                      }
+                      if (!rowOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (Anti-CCP high)`);
+                      }
+                      if (
+                        sampleR === 'appended' ||
+                        sampleR === 'set' ||
+                        rowR === 'appended' ||
+                        rowR === 'set'
+                      ) {
+                        savePending = true;
+                      }
+                    } else {
+                      const pats = e.testCode === B12 ? b12NamePatterns : vitDNamePatterns;
+                      const sampleR = await ensureHoldComment(page, SUPPLEMENT_HISTORY_PROMPT);
+                      const rowR = await ensureInlineComment(page, pats, HIGH_COMMENT);
+                      const sampleOk = sampleR !== 'missing';
+                      const rowOk = rowR !== 'missing';
+                      applied.set(e.testCode, sampleOk && rowOk);
+                      if (!sampleOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: hold Comments not found (high-comment)`);
+                      }
+                      if (!rowOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (high-comment)`);
                       }
                       if (
                         sampleR === 'appended' ||

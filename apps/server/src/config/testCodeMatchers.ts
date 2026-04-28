@@ -1,5 +1,5 @@
 import type { TestCodeId } from '@stellar/shared';
-import { B12, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
+import { B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
 
 /**
  * Display-name patterns used to recognise an enabled test in a SID's worksheet
@@ -27,6 +27,7 @@ export const TEST_CODE_NAME_PATTERNS: Record<TestCodeId, RegExp[]> = {
     /\bimmunoglobulin\s+e\b/i,
     /\big\s*-?\s*e\b/i,
   ],
+  [PROLACTIN]: [/\bprolactin\b/i],
 };
 
 /**

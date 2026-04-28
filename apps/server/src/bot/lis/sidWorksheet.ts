@@ -33,12 +33,15 @@ export async function isSidWorksheetVisible(page: Page): Promise<boolean> {
  */
 export async function openSidWorksheet(page: Page, sid: string, timeoutMs = 12000): Promise<void> {
   const sidLiteral = escapeXPathText(sid);
+  // Use normalize-space(.) not text() so anchors that wrap the SID in <span> (common in
+  // WebForms) still match; listSidsForCurrentPage uses textContent for the same reason.
   await clickElement(
     page,
     [
-      `//a[contains(@id,'hpVail') and normalize-space(text())=${sidLiteral}]`,
-      `//table[contains(@id,'gvSample')]//a[normalize-space(text())=${sidLiteral}]`,
-      `//tr//a[contains(normalize-space(text()), ${sidLiteral})]`,
+      `//a[contains(@id,'hpVail') and normalize-space(.)=${sidLiteral}]`,
+      `//table[contains(@id,'gvSample')]//td[4]//a[normalize-space(.)=${sidLiteral}]`,
+      `//table[contains(@id,'gvSample')]//a[normalize-space(.)=${sidLiteral}]`,
+      `//tr//a[contains(normalize-space(.), ${sidLiteral})]`,
     ],
     { retries: 3, waitTimeout: 4000 }
   );

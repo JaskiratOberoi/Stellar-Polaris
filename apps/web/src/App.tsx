@@ -19,7 +19,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './com
 import { Label } from './components/ui/label';
 import { Switch } from './components/ui/switch';
 
-const initialEnabled: Record<TestCodeId, boolean> = { BI235: true, BI005: true, BI133: true };
+const initialEnabled: Record<TestCodeId, boolean> = {
+  BI235: true,
+  BI005: true,
+  BI133: true,
+  BI180: true,
+};
 
 /** Client-side cap so the DOM stays bounded; server retains up to its own limit in `sids/active.jsonl`. */
 const MAX_SID_ENTRIES = 5000;
@@ -320,7 +325,8 @@ export function App() {
           <CardHeader>
             <CardTitle>Test codes</CardTitle>
             <CardDescription>
-              Enable any combination. The bot processes enabled codes in order: BI235, then BI005, then BI133.
+              Enable any combination. The bot processes enabled codes in order: BI235, then BI005, then BI133,
+              then BI180.
             </CardDescription>
           </CardHeader>
           <CardContent>

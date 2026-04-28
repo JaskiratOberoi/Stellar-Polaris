@@ -31,16 +31,21 @@ import { matchTestCode, normalizeTestName } from '../config/testCodeMatchers.js'
 import {
   b12NamePatternSources,
   decideB12,
+  decideProlactin,
   decideTotalIgE,
   decideVitD,
   HIGH_COMMENT,
   IGE_HIGH_COMMENT,
   igENamePatternSources,
+  PROLACTIN_COMPANION_PATTERN_SOURCES,
+  PROLACTIN_HISTORY_PROMPT,
+  PROLACTIN_ROW_COMMENT,
+  prolactinNamePatternSources,
   SUPPLEMENT_HISTORY_PROMPT,
   parseAgeSex,
   vitDNamePatternSources,
 } from '../config/authRules.js';
-import { B12, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
+import { B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
 import {
   clickSaveAndSettle,
   ensureRowComment,
@@ -84,8 +89,10 @@ function mergeTestsByCode(hits: WorksheetTestHit[]): WorksheetTestHit[] {
   return [...by.values()];
 }
 
-function planKindToAuth(d: { kind: 'auth' | 'high-comment' | 'defer' | 'skip' }): B12AuthKind {
-  if (d.kind === 'auth') return 'auth';
+function planKindToAuth(d: {
+  kind: 'auth' | 'auth-with-note' | 'high-comment' | 'defer' | 'skip';
+}): B12AuthKind {
+  if (d.kind === 'auth' || d.kind === 'auth-with-note') return 'auth';
   if (d.kind === 'high-comment') return 'high-comment';
   if (d.kind === 'defer') return 'defer';
   return 'skip';
@@ -179,6 +186,10 @@ export async function runVitaminPanelScan(options: {
     const b12NamePatterns = b12NamePatternSources();
     const vitDNamePatterns = vitDNamePatternSources();
     const igeNamePatterns = igENamePatternSources();
+    const prolactinNamePatterns = prolactinNamePatternSources();
+    const companionRe = PROLACTIN_COMPANION_PATTERN_SOURCES.map((s) => new RegExp(s, 'i'));
+    /** SIDs whose Prolactin decision is auth-with-note (upper–40 band) — tick + row comment in write mode. */
+    const prolactinNeedsNote = new Set<string>();
     let modalsOpened = 0;
     let modalsSkipped = 0;
 
@@ -209,6 +220,7 @@ export async function runVitaminPanelScan(options: {
 
           for (const sid of sids) {
             if (signal.aborted) break;
+            prolactinNeedsNote.clear();
             const known = seenSids.get(sid);
             const fullyResolved = !!known && [...enabledCodes].every((c) => known.has(c));
             if (fullyResolved) {
@@ -255,15 +267,29 @@ export async function runVitaminPanelScan(options: {
               for (const t of deduped) acc.add(t.testCode);
               if (enabledCodes.has(TOTAL_IGE) && hasAllergyProfile) acc.add(TOTAL_IGE);
 
-              /** Any named row (including section headers) that is not B12, Vit D, or IgE counts as an extra test for the gate. */
-              const otherTestRows = rows.filter((r) => {
+              /**
+               * Named data rows that are not one of our tracked tests. When the modal
+               * has only Prolactin (BI180) as a tracked hit, TSH and Thyroid Profile I
+               * are allowed companions and are filtered out here.
+               */
+              const otherTestRowsRaw = rows.filter((r) => {
                 if (!String(r.rawName ?? '').trim()) return false;
                 return matchTestCode(r.rawName) == null;
               });
-              const hasOtherTests = otherTestRows.length > 0;
               const eligibleSet = new Set(deduped.map((t) => t.testCode));
+              const prolactinOnlyTracked = eligibleSet.has(PROLACTIN) && eligibleSet.size === 1;
+              const otherTestRows = prolactinOnlyTracked
+                ? otherTestRowsRaw.filter((r) => {
+                    const n = normalizeTestName(r.rawName);
+                    return !companionRe.some((re) => re.test(n));
+                  })
+                : otherTestRowsRaw;
+              const hasOtherTests = otherTestRows.length > 0;
               const igeMixed = eligibleSet.has(TOTAL_IGE) && eligibleSet.size > 1;
-              const gateBlocked = hasOtherTests || igeMixed;
+              const prolactinMixed =
+                eligibleSet.has(PROLACTIN) &&
+                (eligibleSet.has(B12) || eligibleSet.has(VITAMIN_D) || eligibleSet.has(TOTAL_IGE));
+              const gateBlocked = hasOtherTests || igeMixed || prolactinMixed;
               const gateReason = hasOtherTests
                 ? (() => {
                     const names = [...new Set(otherTestRows.map((r) => r.rawName))];
@@ -272,18 +298,22 @@ export async function runVitaminPanelScan(options: {
                       names.length > 4 ? ', …' : ''
                     }`;
                   })()
-                : 'auth gate: IgE cannot be authenticated alongside B12 or Vit D (manual review)';
+                : igeMixed
+                  ? 'auth gate: IgE cannot be authenticated alongside B12 or Vit D (manual review)'
+                  : 'auth gate: Prolactin cannot be authenticated alongside B12 / Vit D / IgE (manual review)';
 
               const needB12Auth = enabledCodes.has(B12) && deduped.some((t) => t.testCode === B12);
               const needVitDAuth = enabledCodes.has(VITAMIN_D) && deduped.some((t) => t.testCode === VITAMIN_D);
               const needIgEAuth =
                 enabledCodes.has(TOTAL_IGE) && deduped.some((t) => t.testCode === TOTAL_IGE);
+              const needProlactinAuth =
+                enabledCodes.has(PROLACTIN) && deduped.some((t) => t.testCode === PROLACTIN);
 
               type AuthEval = { testCode: TestCodeId; decision: B12AuthKind; reason: string };
               const evals: AuthEval[] = [];
               let ageMonths: number | null = null;
               let sex: 'M' | 'F' | null = null;
-              if (!gateBlocked && (needB12Auth || needVitDAuth || needIgEAuth)) {
+              if (!gateBlocked && (needB12Auth || needVitDAuth || needIgEAuth || needProlactinAuth)) {
                 const ageText = await readPatientAgeSex(page);
                 const parsed = parseAgeSex(ageText);
                 ageMonths = parsed.ageMonths;
@@ -298,6 +328,9 @@ export async function runVitaminPanelScan(options: {
                 }
                 if (needIgEAuth) {
                   evals.push({ testCode: TOTAL_IGE, decision: 'skip', reason: gateReason });
+                }
+                if (needProlactinAuth) {
+                  evals.push({ testCode: PROLACTIN, decision: 'skip', reason: gateReason });
                 }
                 if (evals.length > 0) log(emit, 'warn', `SID ${sid}: ${gateReason}`);
               } else {
@@ -348,6 +381,28 @@ export async function runVitaminPanelScan(options: {
                     }
                   }
                 }
+                if (needProlactinAuth) {
+                  const prlHit = deduped.find((t) => t.testCode === PROLACTIN)!;
+                  if (await isRowAuthed(page, prolactinNamePatterns)) {
+                    evals.push({
+                      testCode: PROLACTIN,
+                      decision: 'already-authed',
+                      reason: 'Prolactin row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideProlactin(prlHit.value, ageMonths, sex);
+                    if (d.kind === 'auth-with-note') prolactinNeedsNote.add(sid);
+                    const decision = planKindToAuth(d);
+                    evals.push({ testCode: PROLACTIN, decision, reason: d.reason });
+                    if (decision === 'high-comment' || decision === 'skip') {
+                      log(
+                        emit,
+                        'warn',
+                        `SID ${sid} Prolactin (BI180): ${decision} — ${d.reason} (manual review)`
+                      );
+                    }
+                  }
+                }
               }
               for (const e of evals) {
                 if (e.decision === 'defer') acc.delete(e.testCode);
@@ -383,15 +438,39 @@ export async function runVitaminPanelScan(options: {
                     continue;
                   }
                   if (e.decision === 'auth') {
-                    const pats =
-                      e.testCode === B12
-                        ? b12NamePatterns
-                        : e.testCode === VITAMIN_D
-                          ? vitDNamePatterns
-                          : igeNamePatterns;
-                    const ok = await tickRowAuth(page, pats);
-                    applied.set(e.testCode, ok);
-                    if (ok) savePending = true;
+                    if (e.testCode === PROLACTIN) {
+                      const tick = await tickRowAuthResult(page, prolactinNamePatterns);
+                      if (!tick.ok) {
+                        applied.set(e.testCode, false);
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: chkAuth not found (Prolactin auth)`);
+                      } else if (prolactinNeedsNote.has(sid)) {
+                        const r = await ensureRowComment(page, prolactinNamePatterns, PROLACTIN_ROW_COMMENT);
+                        if (r === 'missing') {
+                          applied.set(e.testCode, false);
+                          log(emit, 'warn', `SID ${sid} ${e.testCode}: row Comments not found (Prolactin auth-with-note)`);
+                        } else {
+                          applied.set(e.testCode, true);
+                          if (tick.changed || r === 'appended' || r === 'set') {
+                            savePending = true;
+                          }
+                        }
+                      } else {
+                        applied.set(e.testCode, true);
+                        if (tick.changed) {
+                          savePending = true;
+                        }
+                      }
+                    } else {
+                      const pats =
+                        e.testCode === B12
+                          ? b12NamePatterns
+                          : e.testCode === VITAMIN_D
+                            ? vitDNamePatterns
+                            : igeNamePatterns;
+                      const ok = await tickRowAuth(page, pats);
+                      applied.set(e.testCode, ok);
+                      if (ok) savePending = true;
+                    }
                   } else if (e.decision === 'high-comment') {
                     if (e.testCode === TOTAL_IGE) {
                       const tick = await tickRowAuthResult(page, igeNamePatterns);
@@ -407,6 +486,20 @@ export async function runVitaminPanelScan(options: {
                         if (tick.changed || r === 'appended' || r === 'set') {
                           savePending = true;
                         }
+                      }
+                    } else if (e.testCode === PROLACTIN) {
+                      // >40: top-right `txtSampleComments` only; no per-row `txtComments`, no chkAuth.
+                      const sampleR = await ensureSampleComment(page, PROLACTIN_HISTORY_PROMPT);
+                      const sampleOk = sampleR !== 'missing';
+                      applied.set(e.testCode, sampleOk);
+                      if (!sampleOk) {
+                        log(
+                          emit,
+                          'warn',
+                          `SID ${sid} ${e.testCode}: sample Comments not found (Prolactin >40)`
+                        );
+                      } else if (sampleR === 'appended' || sampleR === 'set') {
+                        savePending = true;
                       }
                     } else {
                       const pats = e.testCode === B12 ? b12NamePatterns : vitDNamePatterns;

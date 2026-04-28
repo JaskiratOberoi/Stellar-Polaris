@@ -5,7 +5,7 @@ const HOST = process.env.HOST || 'localhost:4400';
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 240000);
 
 const cfg = {
-  testCodes: ['BI235', 'BI005', 'BI133'],
+  testCodes: ['BI235', 'BI005', 'BI133', 'BI180'],
   businessUnit: 'QUGEN',
   statusLabels: ['Tested', 'Partially Tested'],
   headless: true,

@@ -1,4 +1,4 @@
-import type { RunConfig, WsClientEvent } from '@stellar/shared';
+import type { RunConfig, StoredSidEntry, WsClientEvent } from '@stellar/shared';
 
 export type SchedulerSnapshot = Omit<Extract<WsClientEvent, { type: 'SCHEDULER_STATE' }>, 'type'>;
 
@@ -9,7 +9,9 @@ export async function getScheduler(): Promise<SchedulerSnapshot> {
 }
 
 export async function postScheduler(
-  body: { enabled: false } | { enabled: true; cooldownSeconds?: number; config: RunConfig }
+  body:
+    | { enabled: false; cooldownSeconds?: number }
+    | { enabled: true; cooldownSeconds?: number; config: RunConfig }
 ): Promise<SchedulerSnapshot & { ok: boolean }> {
   const res = await fetch('/api/scheduler', {
     method: 'POST',
@@ -59,4 +61,19 @@ export async function getRunStatus(): Promise<{
     runId: string | null;
     startedAt: number | null;
   };
+}
+
+export async function getActiveSids(): Promise<{ entries: StoredSidEntry[] }> {
+  const res = await fetch('/api/sids/active');
+  if (!res.ok) throw new Error('Failed to load active SIDs');
+  return (await res.json()) as { entries: StoredSidEntry[] };
+}
+
+export async function postArchiveSids(): Promise<{ ok: boolean; archiveFile: string; count: number }> {
+  const res = await fetch('/api/sids/archive', { method: 'POST' });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(j.error || res.statusText || 'Archive failed');
+  }
+  return (await res.json()) as { ok: boolean; archiveFile: string; count: number };
 }

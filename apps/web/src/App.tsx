@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { RunConfig, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
+import type { RunConfig, StoredSidEntry, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
 import { atLeastOneTestCodeOn, selectedTestCodesInOrder, TestCodeToggles } from './components/TestCodeToggles';
 import { FiltersPanel } from './components/FiltersPanel';
 import { RunControls } from './components/RunControls';
-import { SidGrid, type SidEntry } from './components/SidGrid';
-import { getRunStatus, getScheduler, postRun, postStop, type SchedulerSnapshot } from './lib/api';
+import { SidGrid } from './components/SidGrid';
+import {
+  getActiveSids,
+  getRunStatus,
+  getScheduler,
+  postArchiveSids,
+  postRun,
+  postStop,
+  type SchedulerSnapshot,
+} from './lib/api';
 import { SchedulerCard } from './components/SchedulerCard';
 import { connectRunWebSocket } from './lib/wsClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
@@ -13,8 +21,8 @@ import { Switch } from './components/ui/switch';
 
 const initialEnabled: Record<TestCodeId, boolean> = { BI235: true, BI005: true, BI133: true };
 
-/** Max SIDs kept in the grid to avoid unbounded memory on long runs. */
-const MAX_SID_ENTRIES = 2000;
+/** Client-side cap so the DOM stays bounded; server retains up to its own limit in `sids/active.jsonl`. */
+const MAX_SID_ENTRIES = 5000;
 
 function parseHourField(s: string): number | null | undefined {
   if (!s.trim()) return undefined;
@@ -59,7 +67,7 @@ export function App() {
   const [fromHour, setFromHour] = useState('');
   const [toHour, setToHour] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
-  const [entries, setEntries] = useState<SidEntry[]>([]);
+  const [entries, setEntries] = useState<StoredSidEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -73,6 +81,62 @@ export function App() {
   const [headed, setHeaded] = useState(false);
   const [schedulerRemote, setSchedulerRemote] = useState<SchedulerSnapshot | null>(null);
 
+  function upsertSidEntry(
+    prev: StoredSidEntry[],
+    runId: string,
+    sid: string,
+    discoveredViaTestCode: TestCodeId,
+    discoveredViaStatus: string,
+    tests: WorksheetTestHit[],
+    allergyProfileSuppressedTotalIgE?: boolean,
+    suppressedTotalIgEValue?: string | null,
+    suppressedTotalIgEUnit?: string | null,
+    authGateSkipped?: boolean,
+    authGateReason?: string
+  ): StoredSidEntry[] {
+    const idx = prev.findIndex((e) => e.sid === sid && e.runId === runId);
+    if (idx === -1) {
+      const next: StoredSidEntry = {
+        sid,
+        runId,
+        firstSeenAt: Date.now(),
+        firstSeenViaTestCode: discoveredViaTestCode,
+        firstSeenViaStatus: discoveredViaStatus,
+        testsByCode: {},
+        authByCode: {},
+        allergyProfileSuppressedTotalIgE: allergyProfileSuppressedTotalIgE || false,
+        suppressedTotalIgEValue: suppressedTotalIgEValue ?? undefined,
+        suppressedTotalIgEUnit: suppressedTotalIgEUnit ?? undefined,
+        authGateSkipped: authGateSkipped || false,
+        authGateReason: authGateReason ?? undefined,
+      };
+      for (const t of tests) next.testsByCode[t.testCode] = t;
+      return [...prev, next];
+    }
+    const prevRow = prev[idx]!;
+    const merged: StoredSidEntry = {
+      ...prevRow,
+      testsByCode: { ...prevRow.testsByCode },
+      authByCode: { ...(prevRow.authByCode ?? {}) },
+      allergyProfileSuppressedTotalIgE:
+        prevRow.allergyProfileSuppressedTotalIgE || Boolean(allergyProfileSuppressedTotalIgE),
+      suppressedTotalIgEValue:
+        suppressedTotalIgEValue != null
+          ? suppressedTotalIgEValue
+          : prevRow.suppressedTotalIgEValue,
+      suppressedTotalIgEUnit:
+        suppressedTotalIgEUnit != null && suppressedTotalIgEUnit !== ''
+          ? suppressedTotalIgEUnit
+          : prevRow.suppressedTotalIgEUnit,
+      authGateSkipped: prevRow.authGateSkipped || Boolean(authGateSkipped),
+      authGateReason: authGateReason != null && authGateReason !== '' ? authGateReason : prevRow.authGateReason,
+    };
+    for (const t of tests) merged.testsByCode[t.testCode] = t;
+    const out = prev.slice();
+    out[idx] = merged;
+    return out;
+  }
+
   const onWs = useCallback((ev: WsClientEvent) => {
     if (ev.type === 'LOG') {
       setLogs((prev) => [`[${new Date(ev.ts).toLocaleTimeString()}] ${ev.message}`, ...prev].slice(0, 200));
@@ -81,15 +145,13 @@ export function App() {
     if (ev.type === 'RUN_STARTED') {
       setRunning(true);
       setLastRunId(ev.runId);
-      setEntries([]);
-      setSkippedDedup(0);
-      setSummary(null);
       return;
     }
     if (ev.type === 'SID_TEST_FOUND') {
       setEntries((prev) => {
         const out = upsertSidEntry(
           prev,
+          ev.runId,
           ev.sid,
           ev.discoveredViaTestCode,
           ev.discoveredViaStatus,
@@ -109,18 +171,21 @@ export function App() {
     }
     if (ev.type === 'SID_AUTH_DECISION') {
       setEntries((prev) => {
-        const i = prev.findIndex((e) => e.sid === ev.sid);
+        const i = prev.findIndex((e) => e.sid === ev.sid && e.runId === ev.runId);
         if (i === -1) return prev;
         const row = prev[i]!;
-        const authByCode = { ...row.authByCode, [ev.testCode]: {
-          decision: ev.decision,
-          reason: ev.reason,
-          applied: ev.applied,
-          saveClicked: ev.saveClicked,
-          writeMode: ev.writeMode,
-          ageMonths: ev.ageMonths,
-          sex: ev.sex,
-        } };
+        const authByCode = {
+          ...row.authByCode,
+          [ev.testCode]: {
+            decision: ev.decision,
+            reason: ev.reason,
+            applied: ev.applied,
+            saveClicked: ev.saveClicked,
+            writeMode: ev.writeMode,
+            ageMonths: ev.ageMonths,
+            sex: ev.sex,
+          },
+        };
         const out = prev.slice();
         out[i] = { ...row, authByCode };
         return out;
@@ -148,6 +213,16 @@ export function App() {
       }
       return;
     }
+    if (ev.type === 'SID_LIST_ARCHIVED') {
+      setEntries([]);
+      setSkippedDedup(0);
+      const msg =
+        ev.count > 0 && ev.archiveFile
+          ? `Archived ${ev.count} SID row(s) to ${ev.archiveFile}`
+          : 'SID list cleared (nothing was archived on disk)';
+      setLogs((prev) => [`[${new Date(ev.archivedAt).toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 200));
+      return;
+    }
     if (ev.type === 'SCHEDULER_STATE') {
       setSchedulerRemote({
         enabled: ev.enabled,
@@ -160,59 +235,6 @@ export function App() {
       });
     }
   }, []);
-
-  function upsertSidEntry(
-    prev: SidEntry[],
-    sid: string,
-    discoveredViaTestCode: TestCodeId,
-    discoveredViaStatus: string,
-    tests: WorksheetTestHit[],
-    allergyProfileSuppressedTotalIgE?: boolean,
-    suppressedTotalIgEValue?: string | null,
-    suppressedTotalIgEUnit?: string | null,
-    authGateSkipped?: boolean,
-    authGateReason?: string
-  ): SidEntry[] {
-    const idx = prev.findIndex((e) => e.sid === sid);
-    if (idx === -1) {
-      const next: SidEntry = {
-        sid,
-        firstSeenViaTestCode: discoveredViaTestCode,
-        firstSeenViaStatus: discoveredViaStatus,
-        testsByCode: {},
-        authByCode: {},
-        allergyProfileSuppressedTotalIgE: allergyProfileSuppressedTotalIgE || false,
-        suppressedTotalIgEValue: suppressedTotalIgEValue ?? undefined,
-        suppressedTotalIgEUnit: suppressedTotalIgEUnit ?? undefined,
-        authGateSkipped: authGateSkipped || false,
-        authGateReason: authGateReason ?? undefined,
-      };
-      for (const t of tests) next.testsByCode[t.testCode] = t;
-      return [...prev, next];
-    }
-    const prevRow = prev[idx]!;
-    const merged: SidEntry = {
-      ...prevRow,
-      testsByCode: { ...prevRow.testsByCode },
-      authByCode: { ...(prevRow.authByCode ?? {}) },
-      allergyProfileSuppressedTotalIgE:
-        prevRow.allergyProfileSuppressedTotalIgE || Boolean(allergyProfileSuppressedTotalIgE),
-      suppressedTotalIgEValue:
-        suppressedTotalIgEValue != null
-          ? suppressedTotalIgEValue
-          : prevRow.suppressedTotalIgEValue,
-      suppressedTotalIgEUnit:
-        suppressedTotalIgEUnit != null && suppressedTotalIgEUnit !== ''
-          ? suppressedTotalIgEUnit
-          : prevRow.suppressedTotalIgEUnit,
-      authGateSkipped: prevRow.authGateSkipped || Boolean(authGateSkipped),
-      authGateReason: authGateReason != null && authGateReason !== '' ? authGateReason : prevRow.authGateReason,
-    };
-    for (const t of tests) merged.testsByCode[t.testCode] = t;
-    const out = prev.slice();
-    out[idx] = merged;
-    return out;
-  }
 
   useEffect(() => {
     return connectRunWebSocket(onWs);
@@ -232,6 +254,14 @@ export function App() {
   useEffect(() => {
     getScheduler()
       .then((s) => setSchedulerRemote(s))
+      .catch(() => {
+        /* dev server not up */
+      });
+  }, []);
+
+  useEffect(() => {
+    getActiveSids()
+      .then((r) => setEntries(r.entries.slice(0, MAX_SID_ENTRIES)))
       .catch(() => {
         /* dev server not up */
       });
@@ -264,6 +294,15 @@ export function App() {
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
+
+  const onArchive = useCallback(async () => {
+    setErr(null);
+    try {
+      await postArchiveSids();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   return (
     <div className="mx-auto min-h-screen max-w-4xl p-6 pb-16">
@@ -357,6 +396,8 @@ export function App() {
           skippedDedup={skippedDedup}
           summary={summary}
           atCapacity={entries.length >= MAX_SID_ENTRIES}
+          running={running}
+          onArchive={onArchive}
         />
 
         <Card>

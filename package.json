@@ -9,7 +9,8 @@
     "start": "pnpm --filter @stellar/server start",
     "lint": "eslint .",
     "format": "prettier -w .",
-    "puppeteer:install-chrome": "pnpm --filter @stellar/server exec puppeteer browsers install chrome"
+    "puppeteer:install-chrome": "pnpm --filter @stellar/server exec puppeteer browsers install chrome",
+    "package:win": "pnpm build && node scripts/prepare-chromium-bundle.mjs && pnpm --filter @stellar/electron run build && pnpm --filter @stellar/electron run package:win"
   },
   "devDependencies": {
     "@eslint/js": "^9.16.0",

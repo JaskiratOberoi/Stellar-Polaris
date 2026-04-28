@@ -1,33 +1,27 @@
-import type { SidAuthRecord, TestCodeId, WorksheetTestHit } from '@stellar/shared';
+import type { SidAuthRecord, StoredSidEntry, TestCodeId, WorksheetTestHit } from '@stellar/shared';
 import { TEST_CODE_LABELS } from '@stellar/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+function shortRunId(runId: string): string {
+  return runId.length > 12 ? `${runId.slice(0, 8)}…` : runId;
+}
 
 const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133'];
 
-export type SidEntry = {
-  sid: string;
-  firstSeenViaTestCode: TestCodeId;
-  firstSeenViaStatus: string;
-  testsByCode: Partial<Record<TestCodeId, WorksheetTestHit>>;
-  /** B12 (BI235) auth workflow outcome from `SID_AUTH_DECISION`. */
-  authByCode?: Partial<Record<TestCodeId, SidAuthRecord>>;
-  /** Set when the modal has ALLERGY PROFILE: IgE is not a separate row for our bot. */
-  allergyProfileSuppressedTotalIgE?: boolean;
-  suppressedTotalIgEValue?: string | null;
-  suppressedTotalIgEUnit?: string | null;
-  /** Worksheet has extra tests or disallowed combo; bot skips all auth for this SID. */
-  authGateSkipped?: boolean;
-  authGateReason?: string;
-};
+/** @deprecated Use StoredSidEntry from @stellar/shared */
+export type SidEntry = StoredSidEntry;
 
 export type SidGridProps = {
-  entries: SidEntry[];
+  entries: StoredSidEntry[];
   skippedDedup: number;
   summary: { uniqueSids: number; modalsOpened: number; modalsSkipped: number } | null;
   /** When true, the list is at the UI cap (oldest SIDs may have been dropped). */
   atCapacity?: boolean;
   className?: string;
+  running?: boolean;
+  onArchive?: () => void | Promise<void>;
 };
 
 /** A row from the modal counts as present if we have a hit object, even with empty `value` (e.g. not yet reported). */
@@ -219,7 +213,15 @@ function AllergyProfileIgEBadge({
   );
 }
 
-export function SidGrid({ entries, skippedDedup, summary, atCapacity, className }: SidGridProps) {
+export function SidGrid({
+  entries,
+  skippedDedup,
+  summary,
+  atCapacity,
+  className,
+  running,
+  onArchive,
+}: SidGridProps) {
   if (entries.length === 0) {
     return (
       <Card className={cn('border-dashed border-zinc-700', className)}>
@@ -227,7 +229,10 @@ export function SidGrid({ entries, skippedDedup, summary, atCapacity, className 
           <CardTitle className="text-base">Sample IDs</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-zinc-500">No SIDs yet — start a run or check filters.</p>
+          <p className="text-sm text-zinc-500">
+            No SIDs in the active list. They accumulate across runs on the server until you archive. Start a run or
+            load a previous session.
+          </p>
         </CardContent>
       </Card>
     );
@@ -236,34 +241,57 @@ export function SidGrid({ entries, skippedDedup, summary, atCapacity, className 
   return (
     <Card className={cn('border-zinc-800', className)}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">
-          Sample IDs{' '}
-          <span className="text-sm font-normal text-zinc-500">
-            ({entries.length} unique
-            {skippedDedup > 0 ? `, ${skippedDedup} dedup-skipped` : ''})
-          </span>
-        </CardTitle>
-        {summary ? (
-          <p className="text-xs text-zinc-500">
-            Run summary: {summary.uniqueSids} unique SID(s), {summary.modalsOpened} modal(s) opened,{' '}
-            {summary.modalsSkipped} skipped via dedup.
-          </p>
-        ) : null}
-        {atCapacity ? (
-          <p className="text-xs text-zinc-500">Showing latest 2000 SIDs in this view; older rows are dropped.</p>
-        ) : null}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="text-base">
+              Sample IDs{' '}
+              <span className="text-sm font-normal text-zinc-500">
+                ({entries.length} active row(s)
+                {skippedDedup > 0 ? `, ${skippedDedup} dedup-skipped this run` : ''})
+              </span>
+            </CardTitle>
+            <p className="mt-1 text-xs text-zinc-500">
+              Rows are kept across runs (one row per sample per run). Use Archive to clear the grid and save a JSONL
+              snapshot under your server data directory for audit.
+            </p>
+            {summary ? (
+              <p className="mt-1 text-xs text-zinc-500">
+                Last run summary: {summary.uniqueSids} unique SID(s), {summary.modalsOpened} modal(s) opened,{' '}
+                {summary.modalsSkipped} skipped via dedup.
+              </p>
+            ) : null}
+            {atCapacity ? (
+               <p className="mt-1 text-xs text-amber-500/90">
+                 Showing latest {entries.length} rows in this view; older rows may have been trimmed client-side.
+                </p>
+              ) : null}
+          </div>
+          {onArchive ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0 border-zinc-600 text-zinc-200 hover:bg-zinc-800"
+              disabled={running || entries.length === 0}
+              onClick={() => void onArchive()}
+            >
+              Archive list
+            </Button>
+          ) : null}
+        </div>
       </CardHeader>
       <CardContent>
         <ul className="divide-y divide-zinc-800">
           {entries.map((e) => (
             <li
-              key={e.sid}
+              key={`${e.runId}-${e.sid}`}
               className="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex flex-col">
                 <span className="font-mono text-sm text-amber-400/90 tabular-nums">{e.sid}</span>
                 <span className="text-[11px] text-zinc-500">
-                  via {e.firstSeenViaTestCode} · {e.firstSeenViaStatus}
+                  run {shortRunId(e.runId)} · seen {new Date(e.firstSeenAt).toLocaleString()} · via{' '}
+                  {e.firstSeenViaTestCode} · {e.firstSeenViaStatus}
                 </span>
               </div>
               <div className="flex min-h-[1.75rem] flex-col items-stretch gap-1.5 sm:items-end">

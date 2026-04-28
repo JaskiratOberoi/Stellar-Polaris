@@ -1,0 +1,23 @@
+{
+  "name": "@stellar/electron",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Stellar Polaris desktop shell",
+  "author": "Stellar Polaris",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "package:win": "electron-builder --win nsis --config electron-builder.yml"
+  },
+  "dependencies": {
+    "@stellar/server": "workspace:*",
+    "@stellar/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
+  }
+}

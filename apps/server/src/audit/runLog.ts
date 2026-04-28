@@ -3,12 +3,12 @@ import fs from 'node:fs';
 import type { WriteStream } from 'node:fs';
 import path from 'node:path';
 import {
-  DECISIONS_CSV,
-  ORPHAN_JSONL,
-  RUNS_DIR,
-  SCANS_CSV,
-  SCHEDULER_JSONL,
   ensureLogDirs,
+  getDecisionsCsvPath,
+  getOrphanJsonlPath,
+  getRunsDir,
+  getScansCsvPath,
+  getSchedulerJsonlPath,
 } from './paths.js';
 
 const DECISIONS_HEADER =
@@ -33,14 +33,15 @@ let schedulerLogStream: WriteStream | null = null;
 let orphanStream: WriteStream | null = null;
 
 function runJsonlPath(runId: string): string {
-  return path.join(RUNS_DIR, `${runId}.jsonl`);
+  return path.join(getRunsDir(), `${runId}.jsonl`);
 }
 
 function getDecisionsStream(): WriteStream {
   ensure();
   if (!decisionsStream) {
-    const needHeader = !fs.existsSync(DECISIONS_CSV) || fs.statSync(DECISIONS_CSV).size === 0;
-    decisionsStream = fs.createWriteStream(DECISIONS_CSV, { flags: 'a' });
+    const decisionsCsv = getDecisionsCsvPath();
+    const needHeader = !fs.existsSync(decisionsCsv) || fs.statSync(decisionsCsv).size === 0;
+    decisionsStream = fs.createWriteStream(decisionsCsv, { flags: 'a' });
     if (needHeader) {
       appendLine(decisionsStream, DECISIONS_HEADER);
     }
@@ -51,8 +52,9 @@ function getDecisionsStream(): WriteStream {
 function getScansStream(): WriteStream {
   ensure();
   if (!scansStream) {
-    const needHeader = !fs.existsSync(SCANS_CSV) || fs.statSync(SCANS_CSV).size === 0;
-    scansStream = fs.createWriteStream(SCANS_CSV, { flags: 'a' });
+    const scansCsv = getScansCsvPath();
+    const needHeader = !fs.existsSync(scansCsv) || fs.statSync(scansCsv).size === 0;
+    scansStream = fs.createWriteStream(scansCsv, { flags: 'a' });
     if (needHeader) {
       appendLine(scansStream, SCANS_HEADER);
     }
@@ -63,7 +65,7 @@ function getScansStream(): WriteStream {
 function getSchedulerLogStream(): WriteStream {
   ensure();
   if (!schedulerLogStream) {
-    schedulerLogStream = fs.createWriteStream(SCHEDULER_JSONL, { flags: 'a' });
+    schedulerLogStream = fs.createWriteStream(getSchedulerJsonlPath(), { flags: 'a' });
   }
   return schedulerLogStream;
 }
@@ -71,7 +73,7 @@ function getSchedulerLogStream(): WriteStream {
 function getOrphanStream(): WriteStream {
   ensure();
   if (!orphanStream) {
-    orphanStream = fs.createWriteStream(ORPHAN_JSONL, { flags: 'a' });
+    orphanStream = fs.createWriteStream(getOrphanJsonlPath(), { flags: 'a' });
   }
   return orphanStream;
 }
@@ -177,6 +179,10 @@ export function recordEvent(ev: WsClientEvent): void {
       return;
     }
 
+    if (ev.type === 'SID_LIST_ARCHIVED') {
+      return;
+    }
+
     const runId = (ev as { runId: string }).runId;
     const line = JSON.stringify(ev);
     writeRunJsonl(runId, line, true);
@@ -263,7 +269,7 @@ export function recordEvent(ev: WsClientEvent): void {
         ev.type === 'RUN_DONE' ? 'done' : ev.type === 'RUN_ERROR' ? 'error' : 'stopped';
       const err = ev.type === 'RUN_ERROR' ? ev.error : undefined;
       const summary = lastSummary.get(runId) ?? null;
-      const outPath = path.join(RUNS_DIR, `${runId}.summary.json`);
+      const outPath = path.join(getRunsDir(), `${runId}.summary.json`);
       fs.writeFileSync(
         outPath,
         JSON.stringify(

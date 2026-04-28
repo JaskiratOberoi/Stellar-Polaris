@@ -64,6 +64,13 @@ The server appends a non-volatile audit trail under `apps/server/data/logs/` (sa
 | `scheduler.jsonl` | One JSON line per `SCHEDULER_STATE` broadcast (enable/disable, cooldown, status). |
 | `runs/orphan.jsonl` | Only if an event is recorded before a `RUN_STARTED` for the active run (should be rare / empty). |
 
+**Sample ID grid (server persistence)** — under `<STELLAR_DATA_DIR>/sids/` (same tree as `scheduler.json`; `apps/server/data/sids/` in dev):
+
+| File | Purpose |
+| --- | --- |
+| `active.jsonl` | One JSON object per line (`StoredSidEntry`): the active Sample IDs list; accumulates across runs until archived. |
+| `archive/sids-<timestamp>.jsonl` | Written when you click **Archive list** in the UI (`POST /api/sids/archive`); copy elsewhere for long-term audit. |
+
 There is no automatic rotation in v1: archive or copy `data/logs` periodically if you need to cap size. Credentials are never written to these files (only WebSocket event payloads).
 
 ## Build + run server only
@@ -73,7 +80,29 @@ pnpm build
 pnpm start
 ```
 
-Then open the built static UI from `apps/web/dist` (or point Electron at it later) — for now, use `pnpm dev` for the full UI or serve `apps/web/dist` with any static host.
+Then open the built static UI from `apps/web/dist` — or use `pnpm dev` for the full UI or serve `apps/web/dist` with any static host.
+
+## Windows desktop installer (.exe)
+
+Requires **Node 20+**, **pnpm 9+**, and Chromium available for bundling (same as Setup).
+
+```bash
+pnpm install
+pnpm run puppeteer:install-chrome   # downloads Chrome into ~/.cache/puppeteer (bundled into the installer)
+pnpm run package:win
+```
+
+Produces **`release/StellarPolaris-Setup-<version>.exe`** (NSIS assisted installer). The wizard asks for:
+
+- **Install location** (standard electron-builder directory page)
+- **Logs directory** — audit CSV / JSONL / run logs (`STELLAR_LOGS_DIR`)
+- **Data directory** — `scheduler.json` and related state (`STELLAR_DATA_DIR`)
+
+On upgrade or reinstall, **logs and data paths are pre-filled** from `HKCU\Software\Stellar Polaris` (values `LogsDir`, `DataDir`). The installer also writes `%APPDATA%\Stellar Polaris\config.json` for the packaged app.
+
+Uninstall removes the app and that config/registry key; **log and data folders you chose are not deleted** (they may live outside the install directory).
+
+Code signing is **off** by default; set `CSC_LINK` and `CSC_KEY_PASSWORD` (or your org’s signing setup) to sign the installer.
 
 ## Environment
 
@@ -89,6 +118,10 @@ Then open the built static UI from `apps/web/dist` (or point Electron at it late
 | `HEADLESS` | `true` for headless Chromium |
 | `STELLAR_LOW_MEMORY` | `1` to use leaner Chromium flags when RAM &lt; 5 GiB |
 | `CHROMIUM_EXECUTABLE_PATH` | Optional path to Chrome/Chromium (must exist on disk) |
+| `PUPPETEER_EXECUTABLE_PATH` | Same priority as above in `resolveExecutablePath()` |
+| `STELLAR_DATA_DIR` | Directory for `scheduler.json` and app data (packaged app sets from installer) |
+| `STELLAR_LOGS_DIR` | Audit logs root (defaults to `<STELLAR_DATA_DIR>/logs` if unset) |
+| `STELLAR_STATIC_DIR` | If set, Express serves this folder as the web UI (`index.html` SPA fallback) |
 
 If you see **Could not find Chrome** on startup, the server picks (in order): this env var / Google Chrome in the default OS location / Puppeteer’s downloaded browser. After `pnpm install`, run **`pnpm run puppeteer:install-chrome`**, or install [Google Chrome](https://www.google.com/chrome/) / set `CHROMIUM_EXECUTABLE_PATH`.
 
@@ -97,4 +130,5 @@ If you see **Could not find Chrome** on startup, the server picks (in order): th
 - `shared/` — `RunConfig` and WebSocket event types
 - `apps/server` — Express, WebSocket, Puppeteer bot
 - `apps/web` — React control panel
-- `electron/`, `build/` — reserved for a future Electron shell
+- `electron/` — Electron shell + `electron-builder` config (`electron/electron-builder.yml`)
+- `build/` — NSIS include (`build/installer.nsh`) and bundled resource prep output (`build/chromium-bundle/`)

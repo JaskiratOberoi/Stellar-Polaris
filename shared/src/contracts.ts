@@ -67,6 +67,26 @@ export type SidAuthRecord = {
   sex: 'M' | 'F' | null;
 };
 
+/**
+ * One row in the Sample IDs grid / `sids/active.jsonl`. Key is `(runId, sid)` so the
+ * same SID in a later run appears as a separate row.
+ */
+export type StoredSidEntry = {
+  sid: string;
+  runId: string;
+  /** Epoch ms when this row was first created for the run. */
+  firstSeenAt: number;
+  firstSeenViaTestCode: TestCodeId;
+  firstSeenViaStatus: string;
+  testsByCode: Partial<Record<TestCodeId, WorksheetTestHit>>;
+  authByCode?: Partial<Record<TestCodeId, SidAuthRecord>>;
+  allergyProfileSuppressedTotalIgE?: boolean;
+  suppressedTotalIgEValue?: string | null;
+  suppressedTotalIgEUnit?: string | null;
+  authGateSkipped?: boolean;
+  authGateReason?: string;
+};
+
 export type WsClientEvent =
   | { type: 'LOG'; level: 'info' | 'warn' | 'error'; message: string; ts: number }
   | { type: 'RUN_STARTED'; runId: string }
@@ -126,6 +146,14 @@ export type WsClientEvent =
   | { type: 'RUN_DONE'; runId: string }
   | { type: 'RUN_ERROR'; runId: string; error: string }
   | { type: 'RUN_STOPPED'; runId: string }
+  | {
+      /** Broadcast after POST /api/sids/archive; clears server + clients’ active SID list. */
+      type: 'SID_LIST_ARCHIVED';
+      archivedAt: number;
+      /** Basename or relative path under dataDir/sids/archive/. */
+      archiveFile: string;
+      count: number;
+    }
   | {
       /** Emitted when the continuous scheduler’s settings or phase change. */
       type: 'SCHEDULER_STATE';

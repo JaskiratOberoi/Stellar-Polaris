@@ -5,3 +5,7 @@ dist
 *.log
 apps/web/dist
 apps/server/data/
+release
+electron/dist
+build/chromium-bundle
+*.tsbuildinfo

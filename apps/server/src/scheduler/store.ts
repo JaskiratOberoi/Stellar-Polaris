@@ -1,11 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { RunConfig } from '@stellar/shared';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-export const SCHEDULER_FILE = path.resolve(__dirname, '../../data/scheduler.json');
+import { getSchedulerFilePath } from '../runtime/paths.js';
 
 export type SchedulerPersisted = {
   enabled: boolean;
@@ -23,17 +19,22 @@ const DEFAULTS: SchedulerPersisted = {
   config: null,
 };
 
+function schedulerFile(): string {
+  return getSchedulerFilePath();
+}
+
 function ensureDataDir(): void {
-  const dir = path.dirname(SCHEDULER_FILE);
+  const dir = path.dirname(schedulerFile());
   fs.mkdirSync(dir, { recursive: true });
 }
 
 export function loadScheduler(): SchedulerPersisted {
   try {
-    if (!fs.existsSync(SCHEDULER_FILE)) {
+    const file = schedulerFile();
+    if (!fs.existsSync(file)) {
       return { ...DEFAULTS };
     }
-    const raw = fs.readFileSync(SCHEDULER_FILE, 'utf8');
+    const raw = fs.readFileSync(file, 'utf8');
     const j = JSON.parse(raw) as Partial<SchedulerPersisted>;
     return {
       enabled: Boolean(j.enabled),
@@ -52,7 +53,8 @@ export function loadScheduler(): SchedulerPersisted {
 
 export function saveScheduler(data: SchedulerPersisted): void {
   ensureDataDir();
-  const tmp = `${SCHEDULER_FILE}.${process.pid}.tmp`;
+  const file = schedulerFile();
+  const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmp, SCHEDULER_FILE);
+  fs.renameSync(tmp, file);
 }

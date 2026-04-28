@@ -1,0 +1,35 @@
+appId: com.stellar.polaris
+productName: Stellar Polaris
+copyright: Copyright © Stellar Polaris
+
+directories:
+  output: ../release
+  buildResources: ../build
+
+files:
+  - dist/**
+  - package.json
+
+extraResources:
+  - from: ../build/chromium-bundle
+    to: chromium
+  - from: ../apps/web/dist
+    to: app/web
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: StellarPolaris-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  guid: a1b2c3d4-e5f6-4789-a012-3456789abcde
+  include: ../build/installer.nsh
+  warningsAsErrors: false
+  deleteAppDataOnUninstall: false
+
+npmRebuild: false

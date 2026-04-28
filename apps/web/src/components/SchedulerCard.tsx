@@ -24,6 +24,7 @@ export function SchedulerCard({ buildConfig, onError, remote }: Props) {
   const [cooldownSeconds, setCooldownSeconds] = useState(DEFAULT_COOLDOWN);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const refreshFromServer = useCallback(() => {
     getScheduler()
@@ -57,8 +58,10 @@ export function SchedulerCard({ buildConfig, onError, remote }: Props) {
     setSaving(true);
     try {
       const cd = Math.max(30, Math.min(86400, Math.floor(cooldownSeconds) || DEFAULT_COOLDOWN));
+      setCooldownSeconds(cd);
       if (!runContinuously) {
-        await postScheduler({ enabled: false });
+        await postScheduler({ enabled: false, cooldownSeconds: cd });
+        setSavedAt(Date.now());
         return;
       }
       const config = buildConfig();
@@ -67,6 +70,7 @@ export function SchedulerCard({ buildConfig, onError, remote }: Props) {
         cooldownSeconds: cd,
         config,
       });
+      setSavedAt(Date.now());
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -77,14 +81,21 @@ export function SchedulerCard({ buildConfig, onError, remote }: Props) {
   const onDisable = async () => {
     setSaving(true);
     try {
-      await postScheduler({ enabled: false });
+      await postScheduler({ enabled: false, cooldownSeconds: cooldownSeconds });
       setRunContinuously(false);
+      setSavedAt(Date.now());
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (savedAt == null) return;
+    const id = setTimeout(() => setSavedAt(null), 4000);
+    return () => clearTimeout(id);
+  }, [savedAt]);
 
   return (
     <Card>
@@ -147,13 +158,19 @@ export function SchedulerCard({ buildConfig, onError, remote }: Props) {
           </div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button type="button" disabled={saving} onClick={() => void onSave()}>
-            Save schedule
+            {saving ? 'Saving…' : 'Save schedule'}
           </Button>
           <Button type="button" variant="outline" disabled={saving} onClick={() => void onDisable()}>
             Disable
           </Button>
+          {savedAt ? (
+            <span className="text-xs text-emerald-400">
+              Saved at {new Date(savedAt).toLocaleTimeString()}
+              {!runContinuously ? ' (scheduler disabled)' : ''}
+            </span>
+          ) : null}
         </div>
       </CardContent>
     </Card>

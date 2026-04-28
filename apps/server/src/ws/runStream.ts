@@ -1,6 +1,7 @@
 import type { WsClientEvent } from '@stellar/shared';
 import { WebSocket, WebSocketServer } from 'ws';
 import { recordEvent } from '../audit/runLog.js';
+import { applySidStoreEvent } from '../sids/sidStore.js';
 
 const clients = new Set<WebSocket>();
 
@@ -14,6 +15,11 @@ export function attachRunStreamWss(wss: WebSocketServer): void {
 }
 
 export function broadcastRunEvent(event: WsClientEvent): void {
+  try {
+    applySidStoreEvent(event);
+  } catch {
+    /* sid persistence must not break the bot */
+  }
   try {
     recordEvent(event);
   } catch {

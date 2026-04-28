@@ -16,7 +16,14 @@ export function registerSchedulerRoutes(app: Express): void {
     const body = b as Record<string, unknown>;
 
     if (body.enabled === false) {
-      disableScheduler();
+      const cooldownRaw = body.cooldownSeconds;
+      const cooldownSeconds =
+        typeof cooldownRaw === 'number' && Number.isFinite(cooldownRaw) ? cooldownRaw : null;
+      if (cooldownSeconds != null && (cooldownSeconds < 30 || cooldownSeconds > 24 * 3600)) {
+        res.status(400).json({ error: 'cooldownSeconds must be between 30 and 86400' });
+        return;
+      }
+      disableScheduler(cooldownSeconds ?? undefined);
       res.json({ ok: true, ...getSchedulerSnapshot() });
       return;
     }

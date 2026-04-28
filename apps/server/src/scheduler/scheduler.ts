@@ -8,7 +8,13 @@ import {
 } from '../routes/run.js';
 import { loadScheduler, saveScheduler, type SchedulerPersisted } from './store.js';
 
-let persisted: SchedulerPersisted = loadScheduler();
+/** Filled in `initScheduler` after `STELLAR_*` paths are set (Electron / CLI). */
+let persisted: SchedulerPersisted = {
+  enabled: false,
+  cooldownSeconds: 300,
+  lastRunAt: null,
+  config: null,
+};
 
 let blockedByOtherRun = false;
 let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,6 +158,7 @@ function onExternalRunEnd(): void {
  * Call once at process startup with the shared `RunState` from `registerRunRoutes`.
  */
 export function initScheduler(runState: RunState): void {
+  persisted = loadScheduler();
   runStateRef = runState;
   if (runEndUnsub) runEndUnsub();
   runEndUnsub = subscribeRunEnd(onExternalRunEnd);
@@ -207,8 +214,15 @@ export function enableScheduler(opts: {
   return { ok: true };
 }
 
-export function disableScheduler(): void {
-  persisted = { ...persisted, enabled: false };
+export function disableScheduler(cooldownSeconds?: number): void {
+  persisted = {
+    ...persisted,
+    enabled: false,
+    cooldownSeconds:
+      typeof cooldownSeconds === 'number' && Number.isFinite(cooldownSeconds)
+        ? cooldownSeconds
+        : persisted.cooldownSeconds,
+  };
   saveScheduler(persisted);
   blockedByOtherRun = false;
   clearCooldown();

@@ -58,6 +58,12 @@ function defaultStaticDir(): string | undefined {
   return undefined;
 }
 
+/** Window / taskbar icon (`electron/resources/icon.png`, next to `dist/` in the asar). */
+function resolveAppIcon(): string | undefined {
+  const p = path.join(__dirname, '../resources/icon.png');
+  return fs.existsSync(p) ? p : undefined;
+}
+
 let serverClose: (() => Promise<void>) | null = null;
 let mainWindow: BrowserWindow | null = null;
 let listenPort = 4400;
@@ -73,9 +79,11 @@ function resolveEnvFiles(): string[] {
 }
 
 async function createWindow(port: number): Promise<void> {
+  const icon = resolveAppIcon();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

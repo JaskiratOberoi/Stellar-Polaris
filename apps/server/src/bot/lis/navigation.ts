@@ -140,9 +140,42 @@ export async function setStatus(page: Page, statusLabel: string): Promise<boolea
 }
 
 export async function setTestCode(page: Page, testCode: string): Promise<void> {
+  const filled = await page.evaluate((code: string) => {
+    const lower = (s: string | null | undefined) => String(s ?? '').toLowerCase();
+    const candidates = Array.from(document.querySelectorAll('input, textarea')) as (
+      | HTMLInputElement
+      | HTMLTextAreaElement
+    )[];
+    const el = candidates.find((e) => {
+      const id = lower(e.id);
+      const nm = lower(e.getAttribute('name'));
+      return id.includes('txttestcode') || nm.includes('txttestcode');
+    });
+    if (!el || (el as HTMLInputElement).disabled) return false;
+    el.removeAttribute('readonly');
+    el.focus();
+    (el as HTMLInputElement).select?.();
+    el.value = String(code);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    return true;
+  }, testCode);
+  if (filled) {
+    await delayMs(180);
+    return;
+  }
+
   await typeElement(
     page,
-    ["//input[contains(@id, 'txtTestcode')]", "//input[contains(@name, 'txtTestcode')]"],
+    [
+      "//input[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+      "//input[contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+      "//textarea[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+      "//textarea[contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+      "//input[contains(@id, 'txtTestcode')]",
+      "//input[contains(@name, 'txtTestcode')]",
+    ],
     testCode
   );
 }
@@ -307,7 +340,15 @@ export async function listSidsForCurrentPage(page: Page): Promise<string[]> {
         regionalSkipped += 1;
         continue;
       }
-      const sidLink = row.querySelector("a[id*='hpVail'], td:nth-child(4) a");
+      const byHp = Array.from(row.querySelectorAll('a')).find((a) => {
+        const id = (a.id || '').toLowerCase();
+        return id.includes('hpvail') || id.includes('hpvalid');
+      });
+      const sidLink =
+        byHp ||
+        row.querySelector('td:nth-child(4) a') ||
+        row.querySelector('td:nth-child(3) a') ||
+        row.querySelector('td:nth-child(5) a');
       if (!sidLink) continue;
       const sid = String(sidLink.textContent || (sidLink as HTMLElement).innerText || '').trim();
       const sidLower = sid.toLowerCase();

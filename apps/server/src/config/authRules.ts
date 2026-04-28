@@ -19,6 +19,9 @@ export const PROLACTIN_HIGH_THRESHOLD = 40;
 
 export const ANTI_CCP_INLINE_COMMENT = 'Result Rechecked, Kindly correlate clinically.';
 export const ANTI_CCP_HOLD_COMMENT = '? History';
+/** Lower bound of the auto-auth band (inclusive). Values below this are skipped for manual review. */
+export const ANTI_CCP_LOW_AUTH_THRESHOLD = 7.0;
+/** Upper bound of the auto-auth band (exclusive). Values at or above this get a high comment. */
 export const ANTI_CCP_HIGH_THRESHOLD = 17.0;
 
 export type B12Decision =
@@ -182,10 +185,16 @@ export function decideAntiCcp(rawValue: string | null): AntiCcpDecision {
   }
   const n = Number(String(v).replace(/,/g, ''));
   if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (n < ANTI_CCP_LOW_AUTH_THRESHOLD) {
+    return { kind: 'skip', reason: `value ${n} < ${ANTI_CCP_LOW_AUTH_THRESHOLD} (manual review)` };
+  }
   if (n >= ANTI_CCP_HIGH_THRESHOLD) {
     return { kind: 'high-comment', reason: `value ${n} >= ${ANTI_CCP_HIGH_THRESHOLD}` };
   }
-  return { kind: 'auth', reason: `value ${n} < ${ANTI_CCP_HIGH_THRESHOLD}` };
+  return {
+    kind: 'auth',
+    reason: `value ${n} in [${ANTI_CCP_LOW_AUTH_THRESHOLD}, ${ANTI_CCP_HIGH_THRESHOLD})`,
+  };
 }
 
 /**

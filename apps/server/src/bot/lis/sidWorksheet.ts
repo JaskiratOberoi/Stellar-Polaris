@@ -32,26 +32,64 @@ export async function isSidWorksheetVisible(page: Page): Promise<boolean> {
  * `gvWorksheet` modal to render. Caller is responsible for closing it.
  */
 export async function openSidWorksheet(page: Page, sid: string, timeoutMs = 12000): Promise<void> {
-  const sidLiteral = escapeXPathText(sid);
-  // Use normalize-space(.) not text() so anchors that wrap the SID in <span> (common in
-  // WebForms) still match; listSidsForCurrentPage uses textContent for the same reason.
-  await clickElement(
-    page,
-    [
-      `//a[contains(@id,'hpVail') and normalize-space(.)=${sidLiteral}]`,
-      `//table[contains(@id,'gvSample')]//td[4]//a[normalize-space(.)=${sidLiteral}]`,
-      `//table[contains(@id,'gvSample')]//a[normalize-space(.)=${sidLiteral}]`,
-      `//tr//a[contains(normalize-space(.), ${sidLiteral})]`,
-    ],
-    { retries: 3, waitTimeout: 4000 }
-  );
+  const sidTrim = sid.trim();
+  const sidLiteral = escapeXPathText(sidTrim);
+
+  const clicked = await page.evaluate((want: string) => {
+    const norm = (s: string | null | undefined) =>
+      String(s ?? '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const grids = Array.from(document.querySelectorAll('table')).filter((t) =>
+      String((t as HTMLTableElement).id || '')
+        .toLowerCase()
+        .includes('gvsample')
+    );
+    for (const grid of grids) {
+      const links = Array.from(grid.querySelectorAll('tbody tr a')) as HTMLAnchorElement[];
+      const link = links.find((a) => {
+        const row = a.closest('tr');
+        if (!row) return false;
+        const badge = row.querySelector(
+          "span[id*='lblmccCode'] span.badge, span[id*='lblmccCode'] span[class*='badge']"
+        );
+        if (badge) return false;
+        return norm(a.textContent) === want;
+      });
+      if (!link) continue;
+      link.scrollIntoView({ block: 'center', inline: 'center' });
+      link.click();
+      return true;
+    }
+    return false;
+  }, sidTrim);
+
+  if (!clicked) {
+    const gvs =
+      "contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'gvsample')";
+    await clickElement(
+      page,
+      [
+        `//a[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'hpvail') and normalize-space(.)=${sidLiteral}]`,
+        `//a[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'hpvalid') and normalize-space(.)=${sidLiteral}]`,
+        `//a[contains(@id,'hpVail') and normalize-space(.)=${sidLiteral}]`,
+        `//table[${gvs}]//td[4]//a[normalize-space(.)=${sidLiteral}]`,
+        `//table[${gvs}]//td[3]//a[normalize-space(.)=${sidLiteral}]`,
+        `//table[${gvs}]//td[5]//a[normalize-space(.)=${sidLiteral}]`,
+        `//table[${gvs}]//a[normalize-space(.)=${sidLiteral}]`,
+        `//tr//a[contains(normalize-space(.), ${sidLiteral})]`,
+      ],
+      { retries: 3, waitTimeout: 4000 }
+    );
+  }
 
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (await isSidWorksheetVisible(page)) return;
     await delayMs(150);
   }
-  throw new Error(`SID worksheet modal did not open for ${sid} within ${timeoutMs}ms`);
+  throw new Error(`SID worksheet modal did not open for ${sidTrim} within ${timeoutMs}ms`);
 }
 
 /**

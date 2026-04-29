@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getStatusOptions } from '@/lib/api';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 /** Duplicated for client bundle (server has config/statuses). */
 const DEFAULT_STATUSES: readonly string[] = ['Tested', 'Partially Tested'];
@@ -24,6 +22,33 @@ function filterDefaultOrAll(options: string[]): string[] {
   return options.filter((o) => d.has(o)).length
     ? options.filter((o) => d.has(o))
     : [...options].slice(0, 2);
+}
+
+function StatusPill({
+  opt,
+  on,
+  onClick,
+}: {
+  opt: string;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={on}
+      onClick={onClick}
+      className={cn(
+        'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70',
+        on
+          ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-100 shadow-[0_0_12px_-4px_rgba(16,185,129,0.4)]'
+          : 'border-zinc-700/80 bg-zinc-950/30 text-zinc-500 hover:border-zinc-600 hover:text-zinc-400'
+      )}
+    >
+      {opt}
+    </button>
+  );
 }
 
 export function FiltersPanel(props: {
@@ -74,74 +99,80 @@ export function FiltersPanel(props: {
       });
   }, []);
 
-  const toggle = (opt: string, on: boolean) => {
-    if (on) {
-      if (!statusSelection.includes(opt)) onStatusSelection([...statusSelection, opt]);
-    } else {
+  const toggle = (opt: string) => {
+    if (statusSelection.includes(opt)) {
       onStatusSelection(statusSelection.filter((s) => s !== opt));
+    } else {
+      onStatusSelection([...statusSelection, opt]);
     }
   };
 
+  const inputCls =
+    'h-8 w-full min-w-0 rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-2.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/30';
+
   return (
-    <Card className={cn('border-zinc-800', className)}>
-      <CardHeader>
-        <CardTitle>Worksheet filters</CardTitle>
-        <CardDescription>Match the LIS sample worksheet: BU, status, and optional date/time range (DD/MM/YYYY).</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {loadErr && <p className="text-sm text-amber-500">{loadErr}</p>}
-        <div className="grid gap-2">
-          <Label htmlFor="bu">Business unit</Label>
+    <div className={cn('glass-panel flex min-h-0 min-w-0 flex-col rounded-2xl border p-4', className)}>
+      <div>
+        <h2 className="text-sm font-semibold tracking-tight text-zinc-100">Worksheet filters</h2>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+          BU, status, optional date range (DD/MM/YYYY) and hours (0–23).
+        </p>
+      </div>
+      {loadErr ? <p className="mt-2 text-xs text-amber-500/90">{loadErr}</p> : null}
+      <div className="mt-3 space-y-3">
+        <div>
+          <Label htmlFor="bu" className="text-[10px] uppercase tracking-widest text-zinc-500">
+            Business unit
+          </Label>
           <input
             id="bu"
-            className="h-9 rounded-md border border-zinc-600 bg-zinc-950 px-3 text-sm text-zinc-100"
+            className={cn('mt-1.5', inputCls)}
             value={businessUnit}
             onChange={(e) => onBusinessUnit(e.target.value)}
             placeholder="QUGEN"
+            autoComplete="off"
           />
         </div>
-        <div className="grid gap-2">
-          <span className="text-sm font-medium text-zinc-200">Status (one or more)</span>
-          <div className="grid gap-2 sm:grid-cols-2">
+        <div>
+          <span className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Status</span>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
             {allOptions.map((opt) => (
-              <label key={opt} className="flex items-center gap-2 text-sm text-zinc-300">
-                <Checkbox
-                  checked={statusSelection.includes(opt)}
-                  onCheckedChange={(c: boolean | 'indeterminate') => toggle(opt, c === true)}
-                />
-                {opt}
-              </label>
+              <StatusPill key={opt} opt={opt} on={statusSelection.includes(opt)} onClick={() => toggle(opt)} />
             ))}
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1">
-            <Label htmlFor="fdate">From date</Label>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div>
+            <Label htmlFor="fdate" className="text-[10px] text-zinc-500">
+              From
+            </Label>
             <input
               id="fdate"
-              className="h-9 rounded-md border border-zinc-600 bg-zinc-950 px-3 text-sm"
+              className={cn('mt-1', inputCls)}
               value={fromDate}
               onChange={(e) => onFromDate(e.target.value)}
               placeholder="DD/MM/YYYY"
             />
           </div>
-          <div className="grid gap-1">
-            <Label htmlFor="tdate">To date</Label>
+          <div>
+            <Label htmlFor="tdate" className="text-[10px] text-zinc-500">
+              To
+            </Label>
             <input
               id="tdate"
-              className="h-9 rounded-md border border-zinc-600 bg-zinc-950 px-3 text-sm"
+              className={cn('mt-1', inputCls)}
               value={toDate}
               onChange={(e) => onToDate(e.target.value)}
               placeholder="DD/MM/YYYY"
             />
           </div>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1">
-            <Label htmlFor="fhour">From hour (0–23, optional)</Label>
+          <div>
+            <Label htmlFor="fhour" className="text-[10px] text-zinc-500">
+              From h
+            </Label>
             <input
               id="fhour"
-              className="h-9 rounded-md border border-zinc-600 bg-zinc-950 px-3 text-sm"
+              className={cn('mt-1', inputCls)}
               value={fromHour}
               onChange={(e) => onFromHour(e.target.value)}
               type="number"
@@ -149,11 +180,13 @@ export function FiltersPanel(props: {
               max={23}
             />
           </div>
-          <div className="grid gap-1">
-            <Label htmlFor="thour">To hour (0–23, optional)</Label>
+          <div>
+            <Label htmlFor="thour" className="text-[10px] text-zinc-500">
+              To h
+            </Label>
             <input
               id="thour"
-              className="h-9 rounded-md border border-zinc-600 bg-zinc-950 px-3 text-sm"
+              className={cn('mt-1', inputCls)}
               value={toHour}
               onChange={(e) => onToHour(e.target.value)}
               type="number"
@@ -162,7 +195,7 @@ export function FiltersPanel(props: {
             />
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

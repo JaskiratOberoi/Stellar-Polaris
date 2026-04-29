@@ -55,7 +55,14 @@ export interface WorksheetTestHit {
 }
 
 /** B12 (BI235) / future tests: per-SID LIS auth workflow outcome. */
-export type B12AuthKind = 'auth' | 'high-comment' | 'defer' | 'skip' | 'already-authed';
+/** `auth-inline-comment` = tick chkAuth plus per-test inline comment (e.g. Prolactin upper–40 band). */
+export type B12AuthKind =
+  | 'auth'
+  | 'auth-inline-comment'
+  | 'high-comment'
+  | 'defer'
+  | 'skip'
+  | 'already-authed';
 
 export type SidAuthRecord = {
   decision: B12AuthKind;

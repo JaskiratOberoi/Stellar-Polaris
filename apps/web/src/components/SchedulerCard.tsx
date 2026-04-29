@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { RunConfig } from '@stellar/shared';
 import { getScheduler, postScheduler, type SchedulerSnapshot } from '../lib/api';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Label } from './ui/label';
 import { Switch } from './ui/switch';
 import { Button } from './ui/button';
+import { cn } from '@/lib/utils';
 
 const DEFAULT_COOLDOWN = 300;
 
@@ -12,6 +12,7 @@ type Props = {
   buildConfig: () => RunConfig;
   onError: (message: string) => void;
   remote: SchedulerSnapshot | null;
+  className?: string;
 };
 
 function formatTs(ts: number | null): string {
@@ -19,7 +20,7 @@ function formatTs(ts: number | null): string {
   return new Date(ts).toLocaleString();
 }
 
-export function SchedulerCard({ buildConfig, onError, remote }: Props) {
+export function SchedulerCard({ buildConfig, onError, remote, className }: Props) {
   const [runContinuously, setRunContinuously] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(DEFAULT_COOLDOWN);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -98,81 +99,85 @@ export function SchedulerCard({ buildConfig, onError, remote }: Props) {
   }, [savedAt]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Background scheduler</CardTitle>
-        <CardDescription>
-          Run, wait for the cooldown, then run again. Uses the same filters and test codes as a manual run. Settings are
-          saved to the server and survive restarts (<code className="text-zinc-500">apps/server/data/scheduler.json</code>
-          , gitignored).
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-4 rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-4 py-3">
-          <div className="space-y-0.5">
-            <Label htmlFor="run-continuous" className="text-sm text-zinc-100">
-              Run continuously
-            </Label>
-            <p className="text-xs text-zinc-500">When saved, the server will loop scans until you disable or change settings.</p>
-          </div>
-          <Switch id="run-continuous" checked={runContinuously} onCheckedChange={(v: boolean) => setRunContinuously(v)} />
-        </div>
+    <div className={cn('glass-panel flex min-h-0 flex-col rounded-2xl border p-4', className)}>
+      <div>
+        <h2 className="text-sm font-semibold tracking-tight text-zinc-100">Background scheduler</h2>
+        <p className="mt-0.5 text-[11px] text-zinc-500">
+          Loop runs with cooldown. Persists in{' '}
+          <code className="text-zinc-600">apps/server/data/scheduler.json</code>.
+        </p>
+      </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="cooldown" className="text-sm text-zinc-200">
-            Cooldown between runs (seconds)
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div
+          className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-zinc-800/60 bg-zinc-950/40 px-2.5 py-2"
+          title="Run continuously — server loops scans until you disable or change settings"
+        >
+          <Label
+            htmlFor="run-continuous"
+            className="cursor-default truncate text-[11px] font-medium leading-tight text-zinc-200"
+          >
+            Loop scans
+          </Label>
+          <Switch
+            id="run-continuous"
+            checked={runContinuously}
+            onCheckedChange={(v: boolean) => setRunContinuously(v)}
+            className="shrink-0"
+          />
+        </div>
+        <div className="min-w-0">
+          <Label htmlFor="cooldown" className="text-[9px] uppercase leading-none tracking-wider text-zinc-500">
+            Cooldown (s)
           </Label>
           <input
             id="cooldown"
             type="number"
             min={30}
             max={86400}
-            className="h-9 w-full max-w-xs rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100"
+            className="mt-1 h-8 w-full min-w-0 rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-2 text-xs text-zinc-100 focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
             value={Number.isFinite(cooldownSeconds) ? cooldownSeconds : DEFAULT_COOLDOWN}
             onChange={(e) => setCooldownSeconds(Number(e.target.value))}
           />
-          <p className="text-xs text-zinc-500">Minimum 30, maximum 86400 (24h).</p>
+          <p className="mt-0.5 text-[9px] text-zinc-600">30–86400</p>
         </div>
+      </div>
 
-        {display ? (
-          <div className="rounded-md border border-zinc-800/60 bg-zinc-950/40 p-3 text-xs text-zinc-400">
-            <p>
-              <span className="text-zinc-500">Status: </span>
-              <span className="text-zinc-200">{display.status}</span>
-            </p>
-            <p className="mt-1">
-              <span className="text-zinc-500">Last run end: </span>
-              {formatTs(display.lastRunAt)}
-            </p>
-            <p className="mt-1">
-              <span className="text-zinc-500">Next run: </span>
-              {display.nextRunAt != null
-                ? `${formatTs(display.nextRunAt)} (${secsToNext != null ? `in ${secsToNext}s` : ''})`
-                : '—'}
-            </p>
-            <p className="mt-1">
-              <span className="text-zinc-500">Saved: </span>
-              {display.hasConfig ? 'yes' : 'no'}
-              {!display.headless ? ' · headed (visible browser)' : ''}
-            </p>
-          </div>
+      {display ? (
+        <div className="mt-3 grid gap-1 rounded-xl border border-zinc-800/50 bg-zinc-950/50 p-2.5 font-mono text-[10px] text-zinc-400">
+          <p>
+            <span className="text-zinc-600">Status</span> <span className="text-zinc-200">{display.status}</span>
+          </p>
+          <p>
+            <span className="text-zinc-600">Last</span> {formatTs(display.lastRunAt)}
+          </p>
+          <p>
+            <span className="text-zinc-600">Next</span>{' '}
+            {display.nextRunAt != null
+              ? `${formatTs(display.nextRunAt)}${secsToNext != null ? ` · ${secsToNext}s` : ''}`
+              : '—'}
+          </p>
+          <p>
+            <span className="text-zinc-600">Config</span> {display.hasConfig ? 'saved' : '—'}
+            {!display.headless ? ' · headed' : ''}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" disabled={saving} onClick={() => void onSave()}>
+          {saving ? 'Saving…' : 'Save schedule'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void onDisable()}>
+          Disable
+        </Button>
+        {savedAt ? (
+          <span className="text-[10px] text-emerald-400/90">
+            Saved {new Date(savedAt).toLocaleTimeString()}
+            {!runContinuously ? ' (off)' : ''}
+          </span>
         ) : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" disabled={saving} onClick={() => void onSave()}>
-            {saving ? 'Saving…' : 'Save schedule'}
-          </Button>
-          <Button type="button" variant="outline" disabled={saving} onClick={() => void onDisable()}>
-            Disable
-          </Button>
-          {savedAt ? (
-            <span className="text-xs text-emerald-400">
-              Saved at {new Date(savedAt).toLocaleTimeString()}
-              {!runContinuously ? ' (scheduler disabled)' : ''}
-            </span>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

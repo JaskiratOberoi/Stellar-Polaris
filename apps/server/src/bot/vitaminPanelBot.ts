@@ -96,7 +96,8 @@ function mergeTestsByCode(hits: WorksheetTestHit[]): WorksheetTestHit[] {
 function planKindToAuth(d: {
   kind: 'auth' | 'auth-with-note' | 'high-comment' | 'defer' | 'skip';
 }): B12AuthKind {
-  if (d.kind === 'auth' || d.kind === 'auth-with-note') return 'auth';
+  if (d.kind === 'auth') return 'auth';
+  if (d.kind === 'auth-with-note') return 'auth-inline-comment';
   if (d.kind === 'high-comment') return 'high-comment';
   if (d.kind === 'defer') return 'defer';
   return 'skip';
@@ -193,8 +194,6 @@ export async function runVitaminPanelScan(options: {
     const prolactinNamePatterns = prolactinNamePatternSources();
     const antiCcpNamePatterns = antiCcpNamePatternSources();
     const companionRe = PROLACTIN_COMPANION_PATTERN_SOURCES.map((s) => new RegExp(s, 'i'));
-    /** SIDs whose Prolactin decision is auth-with-note (upper–40 band) — tick + inline comment in write mode. */
-    const prolactinNeedsNote = new Set<string>();
     let modalsOpened = 0;
     let modalsSkipped = 0;
 
@@ -225,7 +224,6 @@ export async function runVitaminPanelScan(options: {
 
           for (const sid of sids) {
             if (signal.aborted) break;
-            prolactinNeedsNote.clear();
             const known = seenSids.get(sid);
             const fullyResolved = !!known && [...enabledCodes].every((c) => known.has(c));
             if (fullyResolved) {
@@ -409,7 +407,6 @@ export async function runVitaminPanelScan(options: {
                     });
                   } else {
                     const d = decideProlactin(prlHit.value, ageMonths, sex);
-                    if (d.kind === 'auth-with-note') prolactinNeedsNote.add(sid);
                     const decision = planKindToAuth(d);
                     evals.push({ testCode: PROLACTIN, decision, reason: d.reason });
                     if (decision === 'high-comment' || decision === 'skip') {
@@ -476,17 +473,17 @@ export async function runVitaminPanelScan(options: {
                     applied.set(e.testCode, false);
                     continue;
                   }
-                  if (e.decision === 'auth') {
+                  if (e.decision === 'auth' || e.decision === 'auth-inline-comment') {
                     if (e.testCode === PROLACTIN) {
                       const tick = await tickRowAuthResult(page, prolactinNamePatterns);
                       if (!tick.ok) {
                         applied.set(e.testCode, false);
                         log(emit, 'warn', `SID ${sid} ${e.testCode}: chkAuth not found (Prolactin auth)`);
-                      } else if (prolactinNeedsNote.has(sid)) {
+                      } else if (e.decision === 'auth-inline-comment') {
                         const r = await ensureInlineComment(page, prolactinNamePatterns, PROLACTIN_INLINE_COMMENT);
                         if (r === 'missing') {
                           applied.set(e.testCode, false);
-                          log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (Prolactin auth-with-note)`);
+                          log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (Prolactin auth+inline)`);
                         } else {
                           applied.set(e.testCode, true);
                           if (tick.changed || r === 'appended' || r === 'set') {

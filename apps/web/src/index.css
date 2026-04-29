@@ -1,9 +1,181 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  html,
+  body {
+    @apply m-0 h-full overflow-hidden;
+  }
+
+  #root {
+    @apply flex h-full min-h-0 flex-col;
+  }
+
   :root {
     color-scheme: dark;
+    --sp-bg: #050508;
+    --sp-surface: rgba(12, 12, 18, 0.72);
+    --sp-blob-1: rgba(244, 114, 182, 0.2);
+    --sp-blob-2: rgba(167, 139, 250, 0.2);
+    --sp-blob-3: rgba(251, 191, 36, 0.16);
+    --sp-blob-4: rgba(56, 189, 248, 0.16);
+    --sp-blob-5: rgba(110, 231, 183, 0.14);
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply h-full min-h-0 text-zinc-100 antialiased;
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    background-color: var(--sp-bg);
+  }
+
+  code,
+  kbd,
+  .font-mono,
+  [class*='font-mono'] {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+}
+
+@layer components {
+  /* Google Stitch–style: soft pastel mesh blobs on dark (no heavy grid) */
+  .sp-app-bg {
+    @apply fixed inset-0 -z-10 overflow-hidden;
+    background-color: var(--sp-bg);
+  }
+
+  .sp-mesh-blob {
+    @apply pointer-events-none absolute mix-blend-screen;
+    border-radius: 50%;
+    filter: blur(100px);
+  }
+
+  .sp-mesh-blob-1 {
+    width: min(55vmin, 28rem);
+    height: min(55vmin, 28rem);
+    left: -8%;
+    top: 5%;
+    background: radial-gradient(circle at 40% 40%, var(--sp-blob-1), transparent 68%);
+    animation: sp-drift-1 48s ease-in-out infinite;
+  }
+
+  .sp-mesh-blob-2 {
+    width: min(50vmin, 24rem);
+    height: min(50vmin, 24rem);
+    right: -5%;
+    top: 15%;
+    background: radial-gradient(circle at 50% 50%, var(--sp-blob-2), transparent 65%);
+    animation: sp-drift-2 55s ease-in-out infinite;
+  }
+
+  .sp-mesh-blob-3 {
+    width: min(45vmin, 22rem);
+    height: min(45vmin, 22rem);
+    left: 25%;
+    bottom: 0%;
+    background: radial-gradient(circle at 30% 60%, var(--sp-blob-3), transparent 70%);
+    animation: sp-drift-3 42s ease-in-out infinite;
+  }
+
+  .sp-mesh-blob-4 {
+    width: min(48vmin, 26rem);
+    height: min(48vmin, 26rem);
+    right: 20%;
+    bottom: 10%;
+    background: radial-gradient(circle at 60% 40%, var(--sp-blob-4), transparent 68%);
+    animation: sp-drift-4 50s ease-in-out infinite;
+  }
+
+  .sp-mesh-blob-5 {
+    width: min(40vmin, 20rem);
+    height: min(40vmin, 20rem);
+    left: 40%;
+    top: 40%;
+    background: radial-gradient(circle at 50% 50%, var(--sp-blob-5), transparent 72%);
+    animation: sp-drift-5 60s ease-in-out infinite;
+  }
+
+  .sp-vignette {
+    @apply pointer-events-none absolute inset-0;
+    background: radial-gradient(ellipse 95% 75% at 50% 100%, transparent 0%, var(--sp-bg) 78%);
+  }
+
+  .glass-panel {
+    @apply border border-zinc-700/40 bg-zinc-900/35 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl;
+  }
+
+  .signal-tile {
+    @apply backdrop-blur-sm;
+  }
+
+  .view-tab {
+    @apply relative rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60;
+  }
+
+  .view-tab[data-active='true'] {
+    @apply text-zinc-100;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-mesh-blob {
+    animation: none !important;
+    opacity: 0.45;
+  }
+}
+
+@keyframes sp-drift-1 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(8%, 6%) scale(1.05);
+  }
+}
+
+@keyframes sp-drift-2 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-6%, 8%) scale(1.08);
+  }
+}
+
+@keyframes sp-drift-3 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(5%, -5%) scale(1.04);
+  }
+}
+
+@keyframes sp-drift-4 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-8%, -4%) scale(1.06);
+  }
+}
+
+@keyframes sp-drift-5 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(4%, 4%) scale(1.1);
   }
 }

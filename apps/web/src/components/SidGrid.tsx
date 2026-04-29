@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import type { SidAuthRecord, StoredSidEntry, TestCodeId, WorksheetTestHit } from '@stellar/shared';
 import { TEST_CODE_LABELS } from '@stellar/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -48,7 +49,7 @@ function TestPill({ code, hit }: { code: TestCodeId; hit: WorksheetTestHit }) {
   const hasValue = hit.value != null && String(hit.value).trim() !== '';
   return (
     <span
-      className="inline-flex items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/60 px-2 py-1 text-xs text-zinc-200"
+      className="inline-flex items-center gap-2 rounded-lg border border-zinc-600/50 bg-zinc-900/50 px-2 py-1 text-xs text-zinc-200 shadow-sm backdrop-blur-sm"
       title={hit.normalRange ? `Normal range: ${hit.normalRange}` : `${label} (${code})`}
     >
       <span className={cn('h-2 w-2 rounded-full', dotClass(hit))} />
@@ -130,6 +131,36 @@ function AuthWorkflowBadge({ code, r }: { code: TestCodeId; r: SidAuthRecord }) 
         title={t}
       >
         {label} · AUTH failed
+      </span>
+    );
+  }
+  if (r.decision === 'auth-inline-comment') {
+    if (!r.writeMode) {
+      return (
+        <span
+          className="inline-flex rounded border border-dashed border-cyan-500/50 px-1.5 py-0.5 text-[10px] text-cyan-200/80"
+          title={t}
+        >
+          {label} · would AUTH+inline
+        </span>
+      );
+    }
+    if (r.applied) {
+      return (
+        <span
+          className="inline-flex rounded border border-cyan-700 bg-cyan-950/50 px-1.5 py-0.5 text-[10px] text-cyan-200"
+          title={t + (r.saveClicked ? ' · saved' : '')}
+        >
+          {label} · AUTH + inline
+        </span>
+      );
+    }
+    return (
+      <span
+        className="inline-flex rounded border border-red-900/60 bg-red-950/30 px-1.5 py-0.5 text-[10px] text-red-300"
+        title={t}
+      >
+        {label} · AUTH + inline failed
       </span>
     );
   }
@@ -222,16 +253,31 @@ export function SidGrid({
   running,
   onArchive,
 }: SidGridProps) {
+  const [hideAuthGateSkips, setHideAuthGateSkips] = useState(false);
+  const authGateSkipCount = useMemo(
+    () => entries.reduce((n, e) => n + (e.authGateSkipped ? 1 : 0), 0),
+    [entries]
+  );
+  const visibleEntries = useMemo(
+    () => (hideAuthGateSkips ? entries.filter((e) => !e.authGateSkipped) : entries),
+    [entries, hideAuthGateSkips]
+  );
+
   if (entries.length === 0) {
     return (
-      <Card className={cn('border-dashed border-zinc-700', className)}>
-        <CardHeader>
-          <CardTitle className="text-base">Sample IDs</CardTitle>
+      <Card
+        className={cn(
+          'flex h-full min-h-0 flex-col overflow-hidden border-dashed border-zinc-600/50 bg-zinc-950/30 shadow-[0_0_0_1px_rgba(24,24,27,0.3)]',
+          className
+        )}
+      >
+        <CardHeader className="shrink-0">
+          <CardTitle className="text-lg font-semibold tracking-tight">Results</CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-zinc-500">
-            No SIDs in the active list. They accumulate across runs on the server until you archive. Start a run or
-            load a previous session.
+        <CardContent className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+          <p className="text-sm leading-relaxed text-zinc-500">
+            No SIDs in the active list. They accumulate across runs on the server until you archive. Start a run or load
+            a previous session.
           </p>
         </CardContent>
       </Card>
@@ -239,63 +285,107 @@ export function SidGrid({
   }
 
   return (
-    <Card className={cn('border-zinc-800', className)}>
-      <CardHeader className="pb-2">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <CardTitle className="text-base">
-              Sample IDs{' '}
-              <span className="text-sm font-normal text-zinc-500">
-                ({entries.length} active row(s)
-                {skippedDedup > 0 ? `, ${skippedDedup} dedup-skipped this run` : ''})
+    <Card
+      className={cn(
+        'flex h-full min-h-0 flex-col overflow-hidden border-zinc-700/50 bg-gradient-to-b from-zinc-900/40 to-zinc-950/80 shadow-[0_24px_64px_-24px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.04)]',
+        className
+      )}
+    >
+      <CardHeader className="shrink-0 border-b border-zinc-800/60 bg-zinc-950/40 pb-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <CardTitle className="text-lg font-semibold tracking-tight text-zinc-50">Results</CardTitle>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-200/90">
+                {hideAuthGateSkips && authGateSkipCount > 0
+                  ? `${visibleEntries.length} of ${entries.length} active`
+                  : `${entries.length} active`}
+                {skippedDedup > 0 ? ` · ${skippedDedup} dedup` : ''}
               </span>
-            </CardTitle>
-            <p className="mt-1 text-xs text-zinc-500">
-              Rows are kept across runs (one row per sample per run). Use Archive to clear the grid and save a JSONL
-              snapshot under your server data directory for audit.
-            </p>
-            {summary ? (
-              <p className="mt-1 text-xs text-zinc-500">
-                Last run summary: {summary.uniqueSids} unique SID(s), {summary.modalsOpened} modal(s) opened,{' '}
-                {summary.modalsSkipped} skipped via dedup.
-              </p>
-            ) : null}
-            {atCapacity ? (
-               <p className="mt-1 text-xs text-amber-500/90">
-                 Showing latest {entries.length} rows in this view; older rows may have been trimmed client-side.
-                </p>
+              {hideAuthGateSkips && authGateSkipCount > 0 ? (
+                <span
+                  className="inline-flex items-center rounded-full border border-zinc-600/80 bg-zinc-900/60 px-2.5 py-0.5 text-[11px] text-zinc-400"
+                  title="SIDs where the auth gate skipped (mixed panel / other tests) are hidden from the grid"
+                >
+                  {authGateSkipCount} gate skip{authGateSkipCount === 1 ? '' : 's'} hidden
+                </span>
               ) : null}
+              {summary ? (
+                <span className="inline-flex items-center rounded-full border border-zinc-700/60 bg-zinc-900/50 px-2.5 py-0.5 text-[11px] text-zinc-400">
+                  Last run: {summary.uniqueSids} SIDs · {summary.modalsOpened} modals · {summary.modalsSkipped} skip
+                </span>
+              ) : null}
+              {atCapacity ? (
+                <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-950/40 px-2.5 py-0.5 text-[11px] text-amber-300/90">
+                  Capped at {entries.length} rows
+                </span>
+              ) : null}
+            </div>
           </div>
-          {onArchive ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {onArchive ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 border-zinc-600 text-zinc-200 hover:bg-zinc-800/80"
+                disabled={running || entries.length === 0}
+                onClick={() => void onArchive()}
+              >
+                Archive list
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="shrink-0 border-zinc-600 text-zinc-200 hover:bg-zinc-800"
-              disabled={running || entries.length === 0}
-              onClick={() => void onArchive()}
+              aria-pressed={hideAuthGateSkips}
+              title={
+                authGateSkipCount === 0
+                  ? 'No auth-gate skips in the list'
+                  : hideAuthGateSkips
+                    ? 'Show SIDs where the auth gate skipped again'
+                    : 'Hide SIDs where the auth gate skipped (other tests / mixed panel) so you only see rows that can run auth'
+              }
+              className={cn(
+                'border-zinc-600 text-zinc-200',
+                hideAuthGateSkips
+                  ? 'border-amber-500/45 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15'
+                  : 'hover:bg-zinc-800/80',
+                authGateSkipCount === 0 && 'opacity-50'
+              )}
+              disabled={authGateSkipCount === 0}
+              onClick={() => setHideAuthGateSkips((v) => !v)}
             >
-              Archive list
+              {hideAuthGateSkips ? 'Show gate skips' : 'Hide gate skips'}
             </Button>
-          ) : null}
+          </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <ul className="divide-y divide-zinc-800">
-          {entries.map((e) => (
+      <CardContent className="min-h-0 flex-1 overflow-y-auto p-0 [scrollbar-gutter:stable]">
+        <ul className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
+          {visibleEntries.length === 0 ? (
+            <li className="col-span-full rounded-xl border border-dashed border-zinc-700/60 bg-zinc-950/20 px-4 py-8 text-center text-sm text-zinc-500">
+              No cards in this view. All {entries.length} SID{entries.length === 1 ? '' : 's'} in the list {entries.length === 1 ? 'is' : 'are'} auth-gate skips. Choose{' '}
+              <span className="font-medium text-zinc-400">Show gate skips</span> to see them.
+            </li>
+          ) : null}
+          {visibleEntries.map((e) => (
             <li
               key={`${e.runId}-${e.sid}`}
-              className="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+              className="group flex flex-col gap-2 rounded-xl border border-zinc-800/60 bg-zinc-950/40 p-3 transition-colors hover:border-zinc-700/80"
             >
-              <div className="flex flex-col">
-                <span className="font-mono text-sm text-amber-400/90 tabular-nums">{e.sid}</span>
-                <span className="text-[11px] text-zinc-500">
-                  run {shortRunId(e.runId)} · seen {new Date(e.firstSeenAt).toLocaleString()} · via{' '}
-                  {e.firstSeenViaTestCode} · {e.firstSeenViaStatus}
+              <div className="flex min-w-0 flex-col">
+                <span className="font-mono text-[15px] font-medium tracking-tight text-amber-300/95 tabular-nums">
+                  {e.sid}
+                </span>
+                <span className="text-[11px] leading-relaxed text-zinc-500">
+                  {shortRunId(e.runId)} · {new Date(e.firstSeenAt).toLocaleString()} · {e.firstSeenViaTestCode} ·{' '}
+                  {e.firstSeenViaStatus}
                 </span>
               </div>
-              <div className="flex min-h-[1.75rem] flex-col items-stretch gap-1.5 sm:items-end">
-                <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+              <div className="flex min-h-0 min-w-0 flex-col items-stretch gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {TEST_CODE_ORDER.filter((code) => hasModalHit(e.testsByCode[code])).map((code) => (
                     <TestPill key={code} code={code} hit={e.testsByCode[code]!} />
                   ))}
@@ -303,13 +393,10 @@ export function SidGrid({
                 {e.allergyProfileSuppressedTotalIgE ||
                 e.authGateSkipped ||
                 (e.authByCode && Object.keys(e.authByCode).length > 0) ? (
-                  <div className="flex flex-wrap justify-end gap-1">
+                  <div className="flex flex-wrap gap-1">
                     {e.authGateSkipped ? <AuthGateBadge reason={e.authGateReason} /> : null}
                     {e.allergyProfileSuppressedTotalIgE ? (
-                      <AllergyProfileIgEBadge
-                        value={e.suppressedTotalIgEValue}
-                        unit={e.suppressedTotalIgEUnit}
-                      />
+                      <AllergyProfileIgEBadge value={e.suppressedTotalIgEValue} unit={e.suppressedTotalIgEUnit} />
                     ) : null}
                     {e.authByCode && Object.keys(e.authByCode).length > 0
                       ? (Object.entries(e.authByCode) as [TestCodeId, SidAuthRecord][])

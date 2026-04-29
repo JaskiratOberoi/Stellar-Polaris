@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import type { RunConfig, StoredSidEntry, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
 import { atLeastOneTestCodeOn, selectedTestCodesInOrder, TestCodeToggles } from './components/TestCodeToggles';
 import { FiltersPanel } from './components/FiltersPanel';
@@ -15,10 +16,9 @@ import {
 } from './lib/api';
 import { SchedulerCard } from './components/SchedulerCard';
 import { connectRunWebSocket } from './lib/wsClient';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
-import { Label } from './components/ui/label';
-import { Switch } from './components/ui/switch';
-
+import { ControlTile } from './components/ControlTile';
+import { ModeToggle } from './components/ModeToggle';
+import { MiniToggle } from './components/MiniToggle';
 const initialEnabled: Record<TestCodeId, boolean> = {
   BI235: true,
   BI005: true,
@@ -29,6 +29,8 @@ const initialEnabled: Record<TestCodeId, boolean> = {
 
 /** Client-side cap so the DOM stays bounded; server retains up to its own limit in `sids/active.jsonl`. */
 const MAX_SID_ENTRIES = 5000;
+
+type ActiveView = 'results' | 'logs';
 
 function parseHourField(s: string): number | null | undefined {
   if (!s.trim()) return undefined;
@@ -64,6 +66,37 @@ function buildRunConfig(
   return c;
 }
 
+function ViewTabButton({
+  id,
+  active,
+  onClick,
+  children,
+}: {
+  id: string;
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      id={id}
+      data-active={active}
+      onClick={onClick}
+      className="view-tab relative"
+    >
+      {active ? (
+        <motion.span
+          layoutId="viewTabBg"
+          className="absolute inset-0 -z-10 rounded-lg border border-amber-500/25 bg-amber-500/10 shadow-[0_0_20px_-8px_rgba(245,158,11,0.35)]"
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        />
+      ) : null}
+      <span className="relative z-10">{children}</span>
+    </button>
+  );
+}
+
 export function App() {
   const [enabled, setEnabled] = useState(initialEnabled);
   const [bu, setBu] = useState('QUGEN');
@@ -86,6 +119,8 @@ export function App() {
   const [authenticate, setAuthenticate] = useState(false);
   const [headed, setHeaded] = useState(false);
   const [schedulerRemote, setSchedulerRemote] = useState<SchedulerSnapshot | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>('results');
+  const [whatsappEnabled, setWhatsappEnabled] = useState(false);
 
   function upsertSidEntry(
     prev: StoredSidEntry[],
@@ -311,122 +346,191 @@ export function App() {
   }, []);
 
   return (
-    <div className="mx-auto min-h-screen max-w-4xl p-6 pb-16">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Stellar Polaris</h1>
-        <p className="text-sm text-zinc-400">
-          Vitamin B12, Vitamin D, Total IgE, Prolactin, and Anti-CCP worksheet SID results (LIS sample grid + modal
-          rows).
-        </p>
-        <p className="mt-1 text-xs text-zinc-500">LIS login uses credentials from the server <code className="text-zinc-400">.env</code> only (e.g. <code className="text-zinc-400">LIS_USERNAME</code> / <code className="text-zinc-400">LIS_PASSWORD</code>).</p>
-        {lastRunId && <p className="mt-2 text-xs text-zinc-500">Run id: {lastRunId}</p>}
-        {err && <p className="mt-2 text-sm text-red-400">Error: {err}</p>}
-        {running && <p className="mt-2 text-sm text-amber-400">Scan in progress…</p>}
-      </header>
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="sp-app-bg" aria-hidden>
+        <div className="sp-mesh-blob sp-mesh-blob-1" />
+        <div className="sp-mesh-blob sp-mesh-blob-2" />
+        <div className="sp-mesh-blob sp-mesh-blob-3" />
+        <div className="sp-mesh-blob sp-mesh-blob-4" />
+        <div className="sp-mesh-blob sp-mesh-blob-5" />
+      </div>
+      <div className="sp-vignette" aria-hidden />
 
-      <div className="space-y-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Test codes</CardTitle>
-            <CardDescription>
-              Enable any combination. The bot processes enabled codes in order: BI235, then BI005, then BI133, then
-              BI180, then BI036.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+      <main className="relative z-0 mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-4 py-3 sm:px-5 lg:px-8">
+        <header className="shrink-0 border-b border-zinc-800/50 pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden
+                className="h-7 w-7 shrink-0 text-amber-300 drop-shadow-[0_0_8px_rgba(245,158,11,0.45)]"
+              >
+                <path d="M12 1l1.6 7.4L21 10l-7.4 1.6L12 19l-1.6-7.4L3 10l7.4-1.6z" fill="currentColor" />
+                <circle cx="12" cy="12" r="1.4" fill="#0a0a0f" />
+              </svg>
+              <h1 className="text-xl font-semibold tracking-tight text-zinc-50 sm:text-2xl">Stellar Polaris</h1>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+              {running ? (
+                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-400/90">
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                  Scan in progress
+                </span>
+              ) : null}
+              {lastRunId ? (
+                <p className="max-w-[min(100%,12rem)] truncate font-mono text-[10px] text-zinc-500 sm:max-w-xs sm:text-right">
+                  Run: {lastRunId}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {err ? (
+            <p className="mt-2 rounded-lg border border-red-500/30 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+              {err}
+            </p>
+          ) : null}
+        </header>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_1fr] gap-3 overflow-hidden lg:grid-cols-[minmax(220px,17rem)_1fr] lg:grid-rows-1 lg:items-stretch lg:gap-4">
+          {/* Left rail: test codes + mode + run + toggles + whatsapp (whatsapp UI-only) */}
+          <aside className="glass-panel flex h-full min-h-0 w-full min-w-0 max-w-full flex-col gap-3 overflow-y-auto rounded-2xl border p-4 lg:max-h-full">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-100">Test codes</h2>
+              <p className="text-[10px] leading-relaxed text-zinc-500">
+                Order: BI235 → BI005 → BI133 → BI180 → BI036
+              </p>
+            </div>
             <TestCodeToggles
               enabled={enabled}
               onChange={(id, v) => setEnabled((e) => ({ ...e, [id]: v }))}
             />
-            <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-amber-900/40 bg-zinc-950/50 px-4 py-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="authenticate" className="text-sm text-zinc-100">
-                  Authenticate (write mode)
-                </Label>
-                <p className="text-xs text-zinc-500">
-                  When on, the bot may tick B12 auth, append a high-result comment, and click Save. Default: dry
-                  run (decisions only).
-                </p>
-                {authenticate ? (
-                  <p className="text-xs text-amber-500/90">This modifies live LIS data. Use a test run first.</p>
-                ) : null}
+            <div className="h-px bg-zinc-800/80" />
+            <ModeToggle authenticate={authenticate} onAuthenticate={setAuthenticate} />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <MiniToggle headless={!headed} onHeadless={(h) => setHeaded(!h)} className="justify-between sm:justify-start" />
+            </div>
+            <div className="h-px bg-zinc-800/80" />
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Integrations</p>
+              <div className="mt-1.5">
+                <ControlTile
+                  id="wa-toggle"
+                  accent="WA"
+                  label="WhatsApp"
+                  sublabel="Alerts (coming soon)"
+                  selected={whatsappEnabled}
+                  onToggle={() => setWhatsappEnabled((v) => !v)}
+                />
               </div>
-              <Switch
-                id="authenticate"
-                checked={authenticate}
-                onCheckedChange={(v: boolean) => setAuthenticate(v)}
+            </div>
+            <div className="h-px bg-zinc-800/80" />
+            <RunControls
+              className="pt-0.5"
+              running={running}
+              canStart={canStart}
+              onStart={onStart}
+              onStop={onStop}
+            />
+          </aside>
+
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden">
+            <div className="grid shrink-0 gap-3 lg:grid-cols-2">
+              <FiltersPanel
+                businessUnit={bu}
+                onBusinessUnit={setBu}
+                statusSelection={statusSelection}
+                onStatusSelection={setStatusSelection}
+                fromDate={fromDate}
+                toDate={toDate}
+                onFromDate={setFromDate}
+                onToDate={setToDate}
+                fromHour={fromHour}
+                toHour={toHour}
+                onFromHour={setFromHour}
+                onToHour={setToHour}
+                className="min-h-0"
+              />
+              <SchedulerCard
+                className="min-h-0"
+                buildConfig={buildCurrentRunConfig}
+                remote={schedulerRemote}
+                onError={(m) => setErr(m)}
               />
             </div>
-            <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-4 py-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="headed" className="text-sm text-zinc-100">
-                  Show browser (headed)
-                </Label>
-                <p className="text-xs text-zinc-500">
-                  When on, runs Chromium in headed mode so you can watch the bot. Default is headless (faster). On a
-                  headless server without a display, leave this off.
-                </p>
+
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
+              <div className="flex shrink-0 items-center gap-1">
+                <ViewTabButton
+                  id="tab-results"
+                  active={activeView === 'results'}
+                  onClick={() => setActiveView('results')}
+                >
+                  Results
+                </ViewTabButton>
+                <ViewTabButton
+                  id="tab-logs"
+                  active={activeView === 'logs'}
+                  onClick={() => setActiveView('logs')}
+                >
+                  Logs
+                  {logs.length > 0 ? (
+                    <span className="ml-1.5 font-mono text-zinc-500">({logs.length})</span>
+                  ) : null}
+                </ViewTabButton>
               </div>
-              <Switch id="headed" checked={headed} onCheckedChange={(v: boolean) => setHeaded(v)} />
+
+              <div className="relative min-h-0 min-w-0 flex-1">
+                <AnimatePresence mode="wait" initial={false}>
+                  {activeView === 'results' ? (
+                    <motion.div
+                      key="results"
+                      className="absolute inset-0 flex min-h-0 min-w-0 flex-col"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <SidGrid
+                        className="h-full min-h-0"
+                        entries={entries}
+                        skippedDedup={skippedDedup}
+                        summary={summary}
+                        atCapacity={entries.length >= MAX_SID_ENTRIES}
+                        running={running}
+                        onArchive={onArchive}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="logs"
+                      className="absolute inset-0 flex min-h-0 min-w-0 flex-col overflow-hidden"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <div className="glass-panel flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border p-4">
+                        <h3 className="shrink-0 text-sm font-semibold text-zinc-200">Logs (latest first)</h3>
+                        {logs.length === 0 ? (
+                          <p className="mt-2 shrink-0 text-sm text-zinc-500">No log lines yet.</p>
+                        ) : (
+                          <ul className="mt-2 min-h-0 flex-1 list-none space-y-0.5 overflow-y-auto font-mono text-xs leading-relaxed text-zinc-400 [scrollbar-gutter:stable]">
+                            {logs.map((l, i) => (
+                              <li key={i} className="break-words border-b border-zinc-800/40 py-1 last:border-0">
+                                {l}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
-            <div className="pt-4">
-              <RunControls
-                running={running}
-                canStart={canStart}
-                onStart={onStart}
-                onStop={onStop}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <FiltersPanel
-          businessUnit={bu}
-          onBusinessUnit={setBu}
-          statusSelection={statusSelection}
-          onStatusSelection={setStatusSelection}
-          fromDate={fromDate}
-          toDate={toDate}
-          onFromDate={setFromDate}
-          onToDate={setToDate}
-          fromHour={fromHour}
-          toHour={toHour}
-          onFromHour={setFromHour}
-          onToHour={setToHour}
-        />
-
-        <SchedulerCard
-          buildConfig={buildCurrentRunConfig}
-          remote={schedulerRemote}
-          onError={(m) => setErr(m)}
-        />
-
-        <SidGrid
-          entries={entries}
-          skippedDedup={skippedDedup}
-          summary={summary}
-          atCapacity={entries.length >= MAX_SID_ENTRIES}
-          running={running}
-          onArchive={onArchive}
-        />
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Log (latest first)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {logs.length === 0 ? (
-              <p className="text-sm text-zinc-500">…</p>
-            ) : (
-              <ul className="max-h-64 list-none space-y-0.5 overflow-y-auto font-mono text-xs text-zinc-400">
-                {logs.map((l, i) => (
-                  <li key={i}>{l}</li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

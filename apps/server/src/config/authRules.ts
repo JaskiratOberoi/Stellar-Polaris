@@ -19,9 +19,9 @@ export const PROLACTIN_HIGH_THRESHOLD = 40;
 
 export const ANTI_CCP_INLINE_COMMENT = 'Result Rechecked, Kindly correlate clinically.';
 export const ANTI_CCP_HOLD_COMMENT = '? History';
-/** Lower bound of the auto-auth band (inclusive). Values below this are skipped for manual review. */
+/** Mid-band lower bound (inclusive). Values below this auto-auth as negative (no comment). */
 export const ANTI_CCP_LOW_AUTH_THRESHOLD = 7.0;
-/** Upper bound of the auto-auth band (exclusive). Values at or above this get a high comment. */
+/** High-comment threshold (inclusive). Values at or above this get hold + inline comment. */
 export const ANTI_CCP_HIGH_THRESHOLD = 17.0;
 
 export type B12Decision =
@@ -180,13 +180,21 @@ export function antiCcpNamePatternSources(): string[] {
 export function decideAntiCcp(rawValue: string | null): AntiCcpDecision {
   const v = (rawValue ?? '').trim();
   if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
+
+  // Literal `<7` / `< 7` / `<7.0` — below detection limit; auto-auth with no comment
+  if (/^<\s*7(?:\.0+)?$/.test(v)) {
+    return { kind: 'auth', reason: `value '${v}' below detection (auto-auth, no comment)` };
+  }
+
   if (/[<>]/.test(v)) {
     return { kind: 'skip', reason: `value '${v}' contains '<' or '>' (manual review)` };
   }
   const n = Number(String(v).replace(/,/g, ''));
   if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (n < 0) return { kind: 'skip', reason: `negative value ${n} (manual review)` };
+
   if (n < ANTI_CCP_LOW_AUTH_THRESHOLD) {
-    return { kind: 'skip', reason: `value ${n} < ${ANTI_CCP_LOW_AUTH_THRESHOLD} (manual review)` };
+    return { kind: 'auth', reason: `value ${n} < ${ANTI_CCP_LOW_AUTH_THRESHOLD} (negative, auto-auth)` };
   }
   if (n >= ANTI_CCP_HIGH_THRESHOLD) {
     return { kind: 'high-comment', reason: `value ${n} >= ${ANTI_CCP_HIGH_THRESHOLD}` };

@@ -3,7 +3,7 @@ import { TEST_CODE_LABELS } from '@stellar/shared';
 import { ControlTile } from './ControlTile';
 import { cn } from '@/lib/utils';
 
-const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036'];
+const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111'];
 
 export function TestCodeToggles(props: {
   enabled: Record<TestCodeId, boolean>;

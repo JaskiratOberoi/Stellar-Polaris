@@ -29,21 +29,44 @@ export async function isRowAuthed(page: Page, patternSources: string[]): Promise
         }
         return false;
       };
+      const classifyBorder = (
+        input: HTMLTextAreaElement | HTMLInputElement | null
+      ): 'red' | 'green' | 'other' | null => {
+        if (!input) return null;
+        const inline = (input.getAttribute('style') || '').toLowerCase();
+        if (/border-color\s*:\s*red/.test(inline)) return 'red';
+        if (/border-color\s*:\s*green/.test(inline)) return 'green';
+        const computed = window.getComputedStyle(input);
+        const c = (computed.borderTopColor || '').toLowerCase();
+        if (/^rgb\(255,\s*0,\s*0\)$|^red$/.test(c)) return 'red';
+        if (/^rgb\(0,\s*128,\s*0\)$|^green$/.test(c)) return 'green';
+        return 'other';
+      };
       const table = document.querySelector("table[id*='gvWorksheet']");
       if (!table) return false;
       const rows = Array.from(table.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
+      const dataRows: { row: HTMLTableRowElement; raw: string }[] = [];
       for (const row of rows) {
         const nameEl = row.querySelector("span[id*='lblTestname']");
         if (!nameEl) continue;
         const raw = (nameEl.textContent || '').replace(/\u00A0/g, ' ').trim();
         if (!matchName(raw)) continue;
-        // Skip section/panel header rows (no value cell) — same rule as extractSidWorksheet.
         const valueEl = row.querySelector("textarea[id*='txtValue'], input[id*='txtValue']");
         if (!valueEl) continue;
-        const auth = row.querySelector<HTMLInputElement>("input[type='checkbox'][id*='chkAuth']");
-        return !!auth?.checked;
+        dataRows.push({ row, raw });
       }
-      return false;
+      if (dataRows.length === 0) return false;
+      const picked =
+        dataRows.find((d) => /\bnephelometry\b/i.test(d.raw)) ??
+        dataRows.find((d) => {
+          const ve = d.row.querySelector(
+            "textarea[id*='txtValue'], input[id*='txtValue']"
+          ) as HTMLInputElement | HTMLTextAreaElement | null;
+          return classifyBorder(ve) === 'red';
+        }) ??
+        dataRows[0];
+      const auth = picked.row.querySelector<HTMLInputElement>("input[type='checkbox'][id*='chkAuth']");
+      return !!auth?.checked;
     },
     patternSources
   );
@@ -53,7 +76,8 @@ export async function isRowAuthed(page: Page, patternSources: string[]): Promise
 export type TickRowAuthResult = { ok: boolean; changed: boolean };
 
 /**
- * Ticks the worksheet row’s `chkAuth` for the first matching data row (skips section headers).
+ * Ticks the worksheet row’s `chkAuth` for the preferred matching data row (RA Factor: Nephelometry row
+ * when both header and detail match the same patterns).
  */
 export async function tickRowAuthResult(page: Page, patternSources: string[]): Promise<TickRowAuthResult> {
   return page.evaluate(
@@ -77,9 +101,23 @@ export async function tickRowAuthResult(page: Page, patternSources: string[]): P
         }
         return false;
       };
+      const classifyBorder = (
+        input: HTMLTextAreaElement | HTMLInputElement | null
+      ): 'red' | 'green' | 'other' | null => {
+        if (!input) return null;
+        const inline = (input.getAttribute('style') || '').toLowerCase();
+        if (/border-color\s*:\s*red/.test(inline)) return 'red';
+        if (/border-color\s*:\s*green/.test(inline)) return 'green';
+        const computed = window.getComputedStyle(input);
+        const c = (computed.borderTopColor || '').toLowerCase();
+        if (/^rgb\(255,\s*0,\s*0\)$|^red$/.test(c)) return 'red';
+        if (/^rgb\(0,\s*128,\s*0\)$|^green$/.test(c)) return 'green';
+        return 'other';
+      };
       const table = document.querySelector("table[id*='gvWorksheet']");
       if (!table) return { ok: false, changed: false };
       const rows = Array.from(table.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
+      const dataRows: { row: HTMLTableRowElement; raw: string }[] = [];
       for (const row of rows) {
         const nameEl = row.querySelector("span[id*='lblTestname']");
         if (!nameEl) continue;
@@ -87,15 +125,25 @@ export async function tickRowAuthResult(page: Page, patternSources: string[]): P
         if (!matchName(raw)) continue;
         const valueEl = row.querySelector("textarea[id*='txtValue'], input[id*='txtValue']");
         if (!valueEl) continue;
-        const auth = row.querySelector<HTMLInputElement>("input[type='checkbox'][id*='chkAuth']");
-        if (!auth) return { ok: false, changed: false };
-        if (auth.checked) return { ok: true, changed: false };
-        auth.click();
-        auth.dispatchEvent(new Event('input', { bubbles: true }));
-        auth.dispatchEvent(new Event('change', { bubbles: true }));
-        return { ok: true, changed: true };
+        dataRows.push({ row, raw });
       }
-      return { ok: false, changed: false };
+      if (dataRows.length === 0) return { ok: false, changed: false };
+      const picked =
+        dataRows.find((d) => /\bnephelometry\b/i.test(d.raw)) ??
+        dataRows.find((d) => {
+          const ve = d.row.querySelector(
+            "textarea[id*='txtValue'], input[id*='txtValue']"
+          ) as HTMLInputElement | HTMLTextAreaElement | null;
+          return classifyBorder(ve) === 'red';
+        }) ??
+        dataRows[0];
+      const auth = picked.row.querySelector<HTMLInputElement>("input[type='checkbox'][id*='chkAuth']");
+      if (!auth) return { ok: false, changed: false };
+      if (auth.checked) return { ok: true, changed: false };
+      auth.click();
+      auth.dispatchEvent(new Event('input', { bubbles: true }));
+      auth.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, changed: true };
     },
     patternSources
   );
@@ -158,9 +206,23 @@ export async function ensureInlineComment(
         }
         return false;
       };
+      const classifyBorder = (
+        input: HTMLTextAreaElement | HTMLInputElement | null
+      ): 'red' | 'green' | 'other' | null => {
+        if (!input) return null;
+        const inline = (input.getAttribute('style') || '').toLowerCase();
+        if (/border-color\s*:\s*red/.test(inline)) return 'red';
+        if (/border-color\s*:\s*green/.test(inline)) return 'green';
+        const computed = window.getComputedStyle(input);
+        const c = (computed.borderTopColor || '').toLowerCase();
+        if (/^rgb\(255,\s*0,\s*0\)$|^red$/.test(c)) return 'red';
+        if (/^rgb\(0,\s*128,\s*0\)$|^green$/.test(c)) return 'green';
+        return 'other';
+      };
       const table = document.querySelector("table[id*='gvWorksheet']");
       if (!table) return 'missing';
       const rows = Array.from(table.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
+      const dataRows: { row: HTMLTableRowElement; raw: string }[] = [];
       for (const row of rows) {
         const nameEl = row.querySelector("span[id*='lblTestname']");
         if (!nameEl) continue;
@@ -168,17 +230,29 @@ export async function ensureInlineComment(
         if (!matchName(raw)) continue;
         const valueEl = row.querySelector("textarea[id*='txtValue'], input[id*='txtValue']");
         if (!valueEl) continue;
-        const el = row.querySelector<HTMLTextAreaElement>("textarea[id*='txtComments']");
-        if (!el) continue;
-        const cur = (el.value || '').trim();
-        if (cur.includes(text)) return 'already';
-        const next = cur ? `${cur}\n${text}` : text;
-        el.value = next;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return cur ? 'appended' : 'set';
+        const commentEl = row.querySelector<HTMLTextAreaElement>("textarea[id*='txtComments']");
+        if (!commentEl) continue;
+        dataRows.push({ row, raw });
       }
-      return 'missing';
+      if (dataRows.length === 0) return 'missing';
+      const picked =
+        dataRows.find((d) => /\bnephelometry\b/i.test(d.raw)) ??
+        dataRows.find((d) => {
+          const ve = d.row.querySelector(
+            "textarea[id*='txtValue'], input[id*='txtValue']"
+          ) as HTMLInputElement | HTMLTextAreaElement | null;
+          return classifyBorder(ve) === 'red';
+        }) ??
+        dataRows[0];
+      const el = picked.row.querySelector<HTMLTextAreaElement>("textarea[id*='txtComments']");
+      if (!el) return 'missing';
+      const cur = (el.value || '').trim();
+      if (cur.includes(text)) return 'already';
+      const next = cur ? `${cur}\n${text}` : text;
+      el.value = next;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return cur ? 'appended' : 'set';
     },
     { sources: patternSources, text: line }
   );

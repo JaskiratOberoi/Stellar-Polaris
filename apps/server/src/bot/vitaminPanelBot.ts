@@ -36,6 +36,7 @@ import {
   decideAntiCcp,
   decideB12,
   decideProlactin,
+  decideRaFactor,
   decideTotalIgE,
   decideVitD,
   HIGH_COMMENT,
@@ -45,11 +46,14 @@ import {
   PROLACTIN_HOLD_COMMENT,
   PROLACTIN_INLINE_COMMENT,
   prolactinNamePatternSources,
+  RA_FACTOR_HOLD_COMMENT,
+  RA_FACTOR_INLINE_COMMENT,
+  raFactorNamePatternSources,
   SUPPLEMENT_HISTORY_PROMPT,
   parseAgeSex,
   vitDNamePatternSources,
 } from '../config/authRules.js';
-import { ANTI_CCP, B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
+import { ANTI_CCP, B12, PROLACTIN, RA_FACTOR, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
 import {
   clickSaveAndSettle,
   ensureHoldComment,
@@ -75,22 +79,40 @@ function rowToHit(row: WorksheetRow, testCode: TestCodeId): WorksheetTestHit {
   };
 }
 
+function hitHasValue(h: WorksheetTestHit): boolean {
+  const v = h.value;
+  return v != null && String(v).trim() !== '';
+}
+
+/**
+ * LIS sometimes emits two rows that match the same test (e.g. link + value); keep one hit per code.
+ * When multiple rows have values, the first row used to win permanently — for RA Factor the LIS shows a
+ * grey panel header row plus "… (Nephelometry)"; both match our regexes and both can have txtValue, so a
+ * stale value on the header row could mask the real Nephelometry result (wrong band / wrong comments).
+ */
+function pickBestDuplicateHit(testCode: TestCodeId, candidates: WorksheetTestHit[]): WorksheetTestHit {
+  const valued = candidates.filter(hitHasValue);
+  const pool = valued.length > 0 ? valued : candidates;
+  if (pool.length === 1) return pool[0]!;
+
+  if (testCode === RA_FACTOR) {
+    const nephelometry = pool.find((h) => /\bnephelometry\b/i.test(h.rawName));
+    if (nephelometry) return nephelometry;
+    const redBorder = pool.find((h) => h.borderColor === 'red');
+    if (redBorder) return redBorder;
+  }
+  return pool[0]!;
+}
+
 /** LIS sometimes emits two rows that match the same test (e.g. link + value); keep one hit per code. */
 function mergeTestsByCode(hits: WorksheetTestHit[]): WorksheetTestHit[] {
-  const by = new Map<TestCodeId, WorksheetTestHit>();
-  const hasValue = (h: WorksheetTestHit) => {
-    const v = h.value;
-    return v != null && String(v).trim() !== '';
-  };
+  const byCode = new Map<TestCodeId, WorksheetTestHit[]>();
   for (const h of hits) {
-    const prev = by.get(h.testCode);
-    if (!prev) {
-      by.set(h.testCode, h);
-      continue;
-    }
-    if (hasValue(h) && !hasValue(prev)) by.set(h.testCode, h);
+    const list = byCode.get(h.testCode) ?? [];
+    list.push(h);
+    byCode.set(h.testCode, list);
   }
-  return [...by.values()];
+  return [...byCode.entries()].map(([testCode, list]) => pickBestDuplicateHit(testCode, list));
 }
 
 function planKindToAuth(d: {
@@ -193,6 +215,7 @@ export async function runVitaminPanelScan(options: {
     const igeNamePatterns = igENamePatternSources();
     const prolactinNamePatterns = prolactinNamePatternSources();
     const antiCcpNamePatterns = antiCcpNamePatternSources();
+    const raFactorNamePatterns = raFactorNamePatternSources();
     const companionRe = PROLACTIN_COMPANION_PATTERN_SOURCES.map((s) => new RegExp(s, 'i'));
     let modalsOpened = 0;
     let modalsSkipped = 0;
@@ -295,7 +318,15 @@ export async function runVitaminPanelScan(options: {
               const antiCcpPresent = eligibleSet.has(ANTI_CCP);
               const antiCcpHasCompanions =
                 antiCcpPresent && (eligibleSet.size > 1 || otherTestRowsRaw.length > 0);
-              const gateBlocked = hasOtherTests || igeMixed || prolactinMixed || antiCcpHasCompanions;
+              const raFactorPresent = eligibleSet.has(RA_FACTOR);
+              const raFactorHasCompanions =
+                raFactorPresent && (eligibleSet.size > 1 || otherTestRowsRaw.length > 0);
+              const gateBlocked =
+                hasOtherTests ||
+                igeMixed ||
+                prolactinMixed ||
+                antiCcpHasCompanions ||
+                raFactorHasCompanions;
               const gateReason = hasOtherTests
                 ? (() => {
                     const names = [...new Set(otherTestRows.map((r) => r.rawName))];
@@ -308,7 +339,9 @@ export async function runVitaminPanelScan(options: {
                   ? 'auth gate: IgE cannot be authenticated alongside B12 or Vit D (manual review)'
                   : prolactinMixed
                     ? 'auth gate: Prolactin cannot be authenticated alongside B12 / Vit D / IgE (manual review)'
-                    : 'auth gate: Anti-CCP must be the only test in the worksheet (manual review)';
+                    : antiCcpHasCompanions
+                      ? 'auth gate: Anti-CCP must be the only test in the worksheet (manual review)'
+                      : 'auth gate: RA Factor must be the only test in the worksheet (manual review)';
 
               const needB12Auth = enabledCodes.has(B12) && deduped.some((t) => t.testCode === B12);
               const needVitDAuth = enabledCodes.has(VITAMIN_D) && deduped.some((t) => t.testCode === VITAMIN_D);
@@ -318,6 +351,8 @@ export async function runVitaminPanelScan(options: {
                 enabledCodes.has(PROLACTIN) && deduped.some((t) => t.testCode === PROLACTIN);
               const needAntiCcpAuth =
                 enabledCodes.has(ANTI_CCP) && deduped.some((t) => t.testCode === ANTI_CCP);
+              const needRaFactorAuth =
+                enabledCodes.has(RA_FACTOR) && deduped.some((t) => t.testCode === RA_FACTOR);
 
               type AuthEval = { testCode: TestCodeId; decision: B12AuthKind; reason: string };
               const evals: AuthEval[] = [];
@@ -325,7 +360,12 @@ export async function runVitaminPanelScan(options: {
               let sex: 'M' | 'F' | null = null;
               if (
                 !gateBlocked &&
-                (needB12Auth || needVitDAuth || needIgEAuth || needProlactinAuth || needAntiCcpAuth)
+                (needB12Auth ||
+                  needVitDAuth ||
+                  needIgEAuth ||
+                  needProlactinAuth ||
+                  needAntiCcpAuth ||
+                  needRaFactorAuth)
               ) {
                 const ageText = await readPatientAgeSex(page);
                 const parsed = parseAgeSex(ageText);
@@ -347,6 +387,9 @@ export async function runVitaminPanelScan(options: {
                 }
                 if (needAntiCcpAuth) {
                   evals.push({ testCode: ANTI_CCP, decision: 'skip', reason: gateReason });
+                }
+                if (needRaFactorAuth) {
+                  evals.push({ testCode: RA_FACTOR, decision: 'skip', reason: gateReason });
                 }
                 if (evals.length > 0) log(emit, 'warn', `SID ${sid}: ${gateReason}`);
               } else {
@@ -439,6 +482,32 @@ export async function runVitaminPanelScan(options: {
                     }
                   }
                 }
+                if (needRaFactorAuth) {
+                  const rfHit = deduped.find((t) => t.testCode === RA_FACTOR)!;
+                  log(
+                    emit,
+                    'info',
+                    `SID ${sid} RA Factor (MS111): row="${rfHit.rawName}" value="${rfHit.value ?? ''}" border=${rfHit.borderColor ?? 'n/a'}`
+                  );
+                  if (await isRowAuthed(page, raFactorNamePatterns)) {
+                    evals.push({
+                      testCode: RA_FACTOR,
+                      decision: 'already-authed',
+                      reason: 'RA Factor row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideRaFactor(rfHit.value);
+                    const decision = planKindToAuth(d);
+                    evals.push({ testCode: RA_FACTOR, decision, reason: d.reason });
+                    if (decision === 'high-comment' || decision === 'skip') {
+                      log(
+                        emit,
+                        'warn',
+                        `SID ${sid} RA Factor (MS111): ${decision} — ${d.reason} (manual review)`
+                      );
+                    }
+                  }
+                }
               }
               for (const e of evals) {
                 if (e.decision === 'defer') acc.delete(e.testCode);
@@ -504,7 +573,9 @@ export async function runVitaminPanelScan(options: {
                             ? vitDNamePatterns
                             : e.testCode === TOTAL_IGE
                               ? igeNamePatterns
-                              : antiCcpNamePatterns;
+                              : e.testCode === ANTI_CCP
+                                ? antiCcpNamePatterns
+                                : raFactorNamePatterns;
                       const ok = await tickRowAuth(page, pats);
                       applied.set(e.testCode, ok);
                       if (ok) savePending = true;
@@ -573,6 +644,30 @@ export async function runVitaminPanelScan(options: {
                       }
                       if (!rowOk) {
                         log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (Anti-CCP high)`);
+                      }
+                      if (
+                        sampleR === 'appended' ||
+                        sampleR === 'set' ||
+                        rowR === 'appended' ||
+                        rowR === 'set'
+                      ) {
+                        savePending = true;
+                      }
+                    } else if (e.testCode === RA_FACTOR) {
+                      const sampleR = await ensureHoldComment(page, RA_FACTOR_HOLD_COMMENT);
+                      const rowR = await ensureInlineComment(
+                        page,
+                        raFactorNamePatterns,
+                        RA_FACTOR_INLINE_COMMENT
+                      );
+                      const sampleOk = sampleR !== 'missing';
+                      const rowOk = rowR !== 'missing';
+                      applied.set(e.testCode, sampleOk && rowOk);
+                      if (!sampleOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: hold Comments not found (RA Factor high)`);
+                      }
+                      if (!rowOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (RA Factor high)`);
                       }
                       if (
                         sampleR === 'appended' ||

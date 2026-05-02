@@ -1,4 +1,4 @@
-import { ANTI_CCP, B12, PROLACTIN, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
+import { ANTI_CCP, B12, PROLACTIN, RA_FACTOR, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
 import { TEST_CODE_NAME_PATTERNS } from './testCodeMatchers.js';
 
 /** Inline (per-test row) B12 / Vit D Comments — `txtComments` — when value is out of range high. */
@@ -23,6 +23,13 @@ export const ANTI_CCP_HOLD_COMMENT = '? History';
 export const ANTI_CCP_LOW_AUTH_THRESHOLD = 7.0;
 /** High-comment threshold (inclusive). Values at or above this get hold + inline comment. */
 export const ANTI_CCP_HIGH_THRESHOLD = 17.0;
+
+export const RA_FACTOR_INLINE_COMMENT = 'Result Rechecked, kindly correlate clinically.';
+export const RA_FACTOR_HOLD_COMMENT = '? History';
+/** Below this: auto-auth (no comment), all ages/genders. */
+export const RA_FACTOR_AUTH_UPPER = 14.0;
+/** Values strictly above this get hold + inline. Band [AUTH_UPPER, HIGH_THRESHOLD] is manual review skip. */
+export const RA_FACTOR_HIGH_THRESHOLD = 20.0;
 
 export type B12Decision =
   | { kind: 'auth'; reason: string }
@@ -202,6 +209,37 @@ export function decideAntiCcp(rawValue: string | null): AntiCcpDecision {
   return {
     kind: 'auth',
     reason: `value ${n} in [${ANTI_CCP_LOW_AUTH_THRESHOLD}, ${ANTI_CCP_HIGH_THRESHOLD})`,
+  };
+}
+
+export type RaFactorDecision =
+  | { kind: 'auth'; reason: string }
+  | { kind: 'high-comment'; reason: string }
+  | { kind: 'defer'; reason: string }
+  | { kind: 'skip'; reason: string };
+
+export function raFactorNamePatternSources(): string[] {
+  return TEST_CODE_NAME_PATTERNS[RA_FACTOR].map((r) => r.source);
+}
+
+export function decideRaFactor(rawValue: string | null): RaFactorDecision {
+  const v = (rawValue ?? '').trim();
+  if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
+  if (/[<>]/.test(v)) {
+    return { kind: 'skip', reason: `value '${v}' contains '<' or '>' (manual review)` };
+  }
+  const n = Number(String(v).replace(/,/g, ''));
+  if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (n < 0) return { kind: 'skip', reason: `negative value ${n} (manual review)` };
+  if (n < RA_FACTOR_AUTH_UPPER) {
+    return { kind: 'auth', reason: `value ${n} < ${RA_FACTOR_AUTH_UPPER} (auto-auth)` };
+  }
+  if (n > RA_FACTOR_HIGH_THRESHOLD) {
+    return { kind: 'high-comment', reason: `value ${n} > ${RA_FACTOR_HIGH_THRESHOLD}` };
+  }
+  return {
+    kind: 'skip',
+    reason: `value ${n} in [${RA_FACTOR_AUTH_UPPER}, ${RA_FACTOR_HIGH_THRESHOLD}] (manual review)`,
   };
 }
 

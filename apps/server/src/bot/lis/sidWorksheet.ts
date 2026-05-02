@@ -27,13 +27,32 @@ export async function isSidWorksheetVisible(page: Page): Promise<boolean> {
   }, MODAL_TABLE_SELECTOR);
 }
 
+/** Read ASP.NET WebForms `__VIEWSTATE` so callers can detect when a postback has actually completed. */
+async function readViewState(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const el = document.querySelector<HTMLInputElement>(
+      "input[name='__VIEWSTATE'], input[id='__VIEWSTATE']"
+    );
+    return el ? el.value : null;
+  });
+}
+
 /**
  * Click the SID anchor in the current sample-grid row and wait for the
- * `gvWorksheet` modal to render. Caller is responsible for closing it.
+ * `gvWorksheet` modal to render with that SID's data. Caller is responsible
+ * for closing it.
+ *
+ * Why this is more careful than "wait for modal to be visible": LIS rebuilds
+ * `gvWorksheet` via an ASP.NET partial postback; between click and postback
+ * completion the previous SID's modal is still on screen. We wait for
+ * `__VIEWSTATE` to change (postback completed) so callers don't read stale
+ * values.
  */
 export async function openSidWorksheet(page: Page, sid: string, timeoutMs = 12000): Promise<void> {
   const sidTrim = sid.trim();
   const sidLiteral = escapeXPathText(sidTrim);
+
+  const beforeViewState = await readViewState(page);
 
   const clicked = await page.evaluate((want: string) => {
     const norm = (s: string | null | undefined) =>
@@ -85,6 +104,15 @@ export async function openSidWorksheet(page: Page, sid: string, timeoutMs = 1200
   }
 
   const started = Date.now();
+
+  if (beforeViewState != null) {
+    while (Date.now() - started < timeoutMs) {
+      const after = await readViewState(page);
+      if (after != null && after !== beforeViewState) break;
+      await delayMs(120);
+    }
+  }
+
   while (Date.now() - started < timeoutMs) {
     if (await isSidWorksheetVisible(page)) return;
     await delayMs(150);
@@ -199,18 +227,24 @@ export async function closeSidWorksheet(page: Page): Promise<boolean> {
 
   await page
     .evaluate((sel: string) => {
-      const modal = document.querySelector(sel);
+      const modal = document.querySelector(sel) as HTMLElement | null;
       if (modal) {
         const wraps = [
-          (modal as Element).closest('.modal'),
-          (modal as Element).closest('.modal-dialog'),
-          (modal as Element).closest('.modal-content'),
-          (modal as Element).closest("[id*='pnlPerson']"),
+          modal.closest('.modal'),
+          modal.closest('.modal-dialog'),
+          modal.closest('.modal-content'),
+          modal.closest("[id*='pnlPerson']"),
         ].filter(Boolean) as HTMLElement[];
         for (const wrap of wraps) {
           wrap.style.display = 'none';
           wrap.setAttribute('aria-hidden', 'true');
         }
+        // Even when no recognised wrapper exists (this LIS often renders the
+        // worksheet inline rather than inside a Bootstrap modal), force the
+        // table itself out so isSidWorksheetVisible cannot match the previous
+        // SID's data while the next postback is in flight.
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
       }
       const backdrop = document.querySelector('.modal-backdrop');
       if (backdrop) backdrop.remove();

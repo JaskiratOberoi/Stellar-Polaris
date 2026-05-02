@@ -25,6 +25,7 @@ const initialEnabled: Record<TestCodeId, boolean> = {
   BI133: true,
   BI180: true,
   BI036: true,
+  MS111: true,
 };
 
 /** Client-side cap so the DOM stays bounded; server retains up to its own limit in `sids/active.jsonl`. */
@@ -397,7 +398,7 @@ export function App() {
             <div>
               <h2 className="text-sm font-semibold text-zinc-100">Test codes</h2>
               <p className="text-[10px] leading-relaxed text-zinc-500">
-                Order: BI235 → BI005 → BI133 → BI180 → BI036
+                Order: BI235 → BI005 → BI133 → BI180 → BI036 → MS111
               </p>
             </div>
             <TestCodeToggles

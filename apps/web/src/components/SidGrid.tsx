@@ -9,7 +9,7 @@ function shortRunId(runId: string): string {
   return runId.length > 12 ? `${runId.slice(0, 8)}…` : runId;
 }
 
-const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111'];
+const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'CP004'];
 
 /** @deprecated Use StoredSidEntry from @stellar/shared */
 export type SidEntry = StoredSidEntry;
@@ -20,6 +20,9 @@ export type SidGridProps = {
   summary: { uniqueSids: number; modalsOpened: number; modalsSkipped: number } | null;
   /** When true, the list is at the UI cap (oldest SIDs may have been dropped). */
   atCapacity?: boolean;
+  /** Optional filter: only SIDs that have a worksheet hit for this test code (`has_hit` semantics). */
+  testCodeFilter?: TestCodeId | null;
+  onTestCodeFilterChange?: (code: TestCodeId | null) => void;
   className?: string;
   running?: boolean;
   onArchive?: () => void | Promise<void>;
@@ -74,6 +77,71 @@ function TestPill({ code, hit }: { code: TestCodeId; hit: WorksheetTestHit }) {
 function AuthWorkflowBadge({ code, r }: { code: TestCodeId; r: SidAuthRecord }) {
   const t = r.reason;
   const label = TEST_CODE_LABELS[code];
+
+  /** Urine routine bot fills values / saves — not LIS “authorise” in the vitamin sense. */
+  if (code === 'CP004') {
+    if (r.decision === 'already-authed') {
+      return (
+        <span
+          className="inline-flex rounded border border-emerald-800 bg-emerald-950/50 px-1.5 py-0.5 text-[10px] text-emerald-200"
+          title={t}
+        >
+          {label} · prior filled
+        </span>
+      );
+    }
+    if (r.decision === 'defer') {
+      return (
+        <span
+          className="inline-flex rounded border border-sky-800 bg-sky-950/50 px-1.5 py-0.5 text-[10px] text-sky-200"
+          title={t}
+        >
+          {label} · PENDING
+        </span>
+      );
+    }
+    if (r.decision === 'skip') {
+      return (
+        <span
+          className="inline-flex rounded border border-zinc-700 bg-zinc-900/50 px-1.5 py-0.5 text-[10px] text-zinc-400"
+          title={t}
+        >
+          {label} · nothing to fill
+        </span>
+      );
+    }
+    if (r.decision === 'auth') {
+      if (!r.writeMode) {
+        return (
+          <span
+            className="inline-flex rounded border border-dashed border-emerald-500/50 px-1.5 py-0.5 text-[10px] text-emerald-300/80"
+            title={t}
+          >
+            {label} · would fill
+          </span>
+        );
+      }
+      if (r.applied) {
+        return (
+          <span
+            className="inline-flex rounded border border-emerald-700 bg-emerald-900/50 px-1.5 py-0.5 text-[10px] text-emerald-200"
+            title={t + (r.saveClicked ? ' · saved' : '')}
+          >
+            Urine Routine Filled{!r.saveClicked ? ' (no save)' : ''}
+          </span>
+        );
+      }
+      return (
+        <span
+          className="inline-flex rounded border border-red-900/60 bg-red-950/30 px-1.5 py-0.5 text-[10px] text-red-300"
+          title={t}
+        >
+          {label} · fill failed
+        </span>
+      );
+    }
+  }
+
   if (r.decision === 'already-authed') {
     return (
       <span
@@ -249,18 +317,24 @@ export function SidGrid({
   skippedDedup,
   summary,
   atCapacity,
+  testCodeFilter = null,
+  onTestCodeFilterChange,
   className,
   running,
   onArchive,
 }: SidGridProps) {
   const [hideAuthGateSkips, setHideAuthGateSkips] = useState(false);
+  const testFiltered = useMemo(() => {
+    if (!testCodeFilter) return entries;
+    return entries.filter((e) => e.testsByCode[testCodeFilter] != null);
+  }, [entries, testCodeFilter]);
   const authGateSkipCount = useMemo(
-    () => entries.reduce((n, e) => n + (e.authGateSkipped ? 1 : 0), 0),
-    [entries]
+    () => testFiltered.reduce((n, e) => n + (e.authGateSkipped ? 1 : 0), 0),
+    [testFiltered]
   );
   const visibleEntries = useMemo(
-    () => (hideAuthGateSkips ? entries.filter((e) => !e.authGateSkipped) : entries),
-    [entries, hideAuthGateSkips]
+    () => (hideAuthGateSkips ? testFiltered.filter((e) => !e.authGateSkipped) : testFiltered),
+    [testFiltered, hideAuthGateSkips]
   );
 
   if (entries.length === 0) {
@@ -298,10 +372,18 @@ export function SidGrid({
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-200/90">
                 {hideAuthGateSkips && authGateSkipCount > 0
-                  ? `${visibleEntries.length} of ${entries.length} active`
-                  : `${entries.length} active`}
+                  ? `${visibleEntries.length} of ${testFiltered.length} active`
+                  : `${testFiltered.length} active`}
                 {skippedDedup > 0 ? ` · ${skippedDedup} dedup` : ''}
               </span>
+              {testCodeFilter && testFiltered.length !== entries.length ? (
+                <span
+                  className="inline-flex items-center rounded-full border border-sky-700/50 bg-sky-950/40 px-2.5 py-0.5 text-[11px] text-sky-200/90"
+                  title="Showing only SIDs whose worksheet has a row for this test"
+                >
+                  {testFiltered.length} of {entries.length} match {TEST_CODE_LABELS[testCodeFilter]}
+                </span>
+              ) : null}
               {hideAuthGateSkips && authGateSkipCount > 0 ? (
                 <span
                   className="inline-flex items-center rounded-full border border-zinc-600/80 bg-zinc-900/60 px-2.5 py-0.5 text-[11px] text-zinc-400"
@@ -317,12 +399,33 @@ export function SidGrid({
               ) : null}
               {atCapacity ? (
                 <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-950/40 px-2.5 py-0.5 text-[11px] text-amber-300/90">
-                  Capped at {entries.length} rows
+                  Capped at {entries.length} rows (UI limit)
                 </span>
               ) : null}
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {onTestCodeFilterChange ? (
+              <label className="flex min-w-0 items-center gap-1.5">
+                <span className="sr-only">Filter by test</span>
+                <select
+                  value={testCodeFilter ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    onTestCodeFilterChange(v === '' ? null : (v as TestCodeId));
+                  }}
+                  className="h-8 max-w-[10.5rem] shrink-0 truncate rounded-md border border-zinc-600 bg-zinc-950 px-2 text-[11px] text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 sm:max-w-[14rem]"
+                  title="Show only SIDs that have a worksheet row for this test"
+                >
+                  <option value="">All tests</option>
+                  {TEST_CODE_ORDER.map((code) => (
+                    <option key={code} value={code}>
+                      {TEST_CODE_LABELS[code]} ({code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {onArchive ? (
               <Button
                 type="button"
@@ -366,7 +469,7 @@ export function SidGrid({
         <ul className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
           {visibleEntries.length === 0 ? (
             <li className="col-span-full rounded-xl border border-dashed border-zinc-700/60 bg-zinc-950/20 px-4 py-8 text-center text-sm text-zinc-500">
-              No cards in this view. All {entries.length} SID{entries.length === 1 ? '' : 's'} in the list {entries.length === 1 ? 'is' : 'are'} auth-gate skips. Choose{' '}
+              No cards in this view. All {testFiltered.length} SID{testFiltered.length === 1 ? '' : 's'} in this view {testFiltered.length === 1 ? 'is' : 'are'} auth-gate skips. Choose{' '}
               <span className="font-medium text-zinc-400">Show gate skips</span> to see them.
             </li>
           ) : null}

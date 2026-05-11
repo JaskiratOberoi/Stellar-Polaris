@@ -1,6 +1,6 @@
 {
   "name": "@stellar/electron",
-  "version": "0.1.7",
+  "version": "0.1.11",
   "private": true,
   "description": "Stellar Polaris desktop shell",
   "author": "Stellar Polaris",

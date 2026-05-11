@@ -9,6 +9,7 @@ import {
 } from './lis/puppeteer.js';
 import {
   clickSearch,
+  ensureWorksheetTestCodeFilter,
   firstSidOnSampleGrid,
   getSampleGridPagerInfo,
   listSidsForCurrentPage,
@@ -157,6 +158,7 @@ export async function runVitaminPanelScan(options: {
     }
   }
 
+  log(emit, 'info', headless ? 'Launching Chromium (headless)…' : 'Launching Chromium (browser window)…');
   const { default: puppeteer } = await import('puppeteer');
   let browser: Browser | null = null;
   try {
@@ -223,12 +225,25 @@ export async function runVitaminPanelScan(options: {
     for (const code of config.testCodes) {
       if (signal.aborted) break;
       log(emit, 'info', `Setting test code: ${code}`);
-      await setTestCode(page, code);
+      const setOk = await setTestCode(page, code);
+      if (!setOk) {
+        log(emit, 'error', `Could not write worksheet test code filter to "${code}"; skipping this code.`);
+        continue;
+      }
       for (const status of config.statusLabels) {
         if (signal.aborted) break;
         log(emit, 'info', `Status filter: ${status}`);
         const statusOk = await setStatus(page, status);
         if (!statusOk) continue;
+        const gate = await ensureWorksheetTestCodeFilter(page, code);
+        if (!gate.ok) {
+          log(
+            emit,
+            'error',
+            `Test code filter not "${code}" before Search (read back: ${gate.readBack ?? 'empty'}); skipping status "${status}".`
+          );
+          continue;
+        }
         const searched = await clickSearch(page);
         if (!searched) {
           log(emit, 'warn', `Search failed for status "${status}" (test code ${code}).`);
@@ -237,6 +252,15 @@ export async function runVitaminPanelScan(options: {
         await waitForSampleGridAfterSearch(page);
         for (let pageNo = 0; pageNo < MAX_GRID_PAGES; pageNo += 1) {
           if (signal.aborted) break;
+          const gatePage = await ensureWorksheetTestCodeFilter(page, code);
+          if (!gatePage.ok) {
+            log(
+              emit,
+              'error',
+              `Test code filter drifted before grid page ${pageNo + 1} for ${code} / "${status}" (read back: ${gatePage.readBack ?? 'empty'}); stopping pagination.`
+            );
+            break;
+          }
           const pagerBefore = await getSampleGridPagerInfo(page);
           const sids = await listSidsForCurrentPage(page);
           log(

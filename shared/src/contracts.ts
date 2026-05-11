@@ -1,5 +1,12 @@
 /** Test code toggle keys used in the UI and bot. */
-export type TestCodeId = 'BI235' | 'BI005' | 'BI133' | 'BI180' | 'BI036' | 'MS111';
+export type TestCodeId =
+  | 'BI235'
+  | 'BI005'
+  | 'BI133'
+  | 'BI180'
+  | 'BI036'
+  | 'MS111'
+  | 'CP004';
 
 export const TEST_CODE_LABELS: Record<TestCodeId, string> = {
   BI235: 'Vitamin B12',
@@ -8,7 +15,11 @@ export const TEST_CODE_LABELS: Record<TestCodeId, string> = {
   BI180: 'Prolactin',
   BI036: 'Anti-CCP',
   MS111: 'RA Factor',
+  CP004: 'Urine Routine',
 };
+
+/** LIS CP004 — urine routine panel; may appear alone in `testCodes` for urine-only runs. */
+export const URINE_ROUTINE_CODE: TestCodeId = 'CP004';
 
 export interface RunConfig {
   /** Which test codes to scan, in order (e.g. BI235 → BI005 → BI133 → BI180 → BI036 → MS111). */
@@ -26,6 +37,20 @@ export interface RunConfig {
    * and emits `SID_AUTH_DECISION` with `applied=false`, no DOM writes.
    */
   authenticate?: boolean;
+  /**
+   * When true, the urine routine (CP004) bot runs in the same scan after the
+   * vitamin panel sweep. It opens the worksheet, sets test code CP004 + the
+   * configured business unit, iterates all matching SIDs, autofills the LIS
+   * Complete Urine Examination defaults (skipping Pus Cells / Epithelial
+   * Cells), authenticates the rows it filled, and saves. Independent of
+   * `testCodes`; setting this without any `testCodes` is a urine-routine-only
+   * run.
+   *
+   * **Wire format:** clients should send an explicit boolean (`true` / `false`).
+   * Omitting the field is treated as false on the server, which would reject
+   * `testCodes: []` unless this flag is true.
+   */
+  urineRoutineEnabled?: boolean;
   /**
    * Set only on the server from `.env` (never from the web UI). Same chain as CBC: `CBC_LOGIN_*` → `LOGIN_*` → `LIS_*` → defaults.
    */
@@ -81,6 +106,20 @@ export type SidAuthRecord = {
  * One row in the Sample IDs grid / `sids/active.jsonl`. Key is `(runId, sid)` so the
  * same SID in a later run appears as a separate row.
  */
+export type SidCountersCodeStats = {
+  workedOn: number;
+  authApplied: number;
+  highCommentApplied: number;
+};
+
+export type SidCountersSnapshot = {
+  /** Epoch ms — last archive (or first seen in active list if no prior meta). */
+  since: number;
+  perCode: Record<TestCodeId, SidCountersCodeStats>;
+  /** Distinct `runId`+`sid` pairs that had qualifying work on any test code. */
+  totalWorkedOnSids: number;
+};
+
 export type StoredSidEntry = {
   sid: string;
   runId: string;
@@ -174,6 +213,13 @@ export type WsClientEvent =
       nextRunAt: number | null;
       hasConfig: boolean;
       headless: boolean;
+    }
+  | {
+      /** Server-side “worked on” tallies since last archive (> DOM card cap). */
+      type: 'SID_COUNTERS';
+      since: number;
+      perCode: Record<TestCodeId, SidCountersCodeStats>;
+      totalWorkedOnSids: number;
     };
 
 export interface ServerStatus {

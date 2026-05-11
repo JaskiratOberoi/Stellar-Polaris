@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { StoredSidEntry, TestCodeId, WsClientEvent, WorksheetTestHit } from '@stellar/shared';
 import { getRuntimePaths } from '../runtime/paths.js';
+import { resetSidCountersForArchive } from './sidCounters.js';
 
 /** Cap in-memory SID rows; older rows remain in `active.jsonl` until next full rewrite. */
 const MAX_SID_ENTRIES = 5000;
@@ -194,6 +195,7 @@ export function archiveActiveSids(): { archiveFile: string; count: number } {
   if (!fs.existsSync(active)) {
     const c = entries.length;
     entries = [];
+    resetSidCountersForArchive();
     return { archiveFile: '', count: c };
   }
 
@@ -213,5 +215,86 @@ export function archiveActiveSids(): { archiveFile: string; count: number } {
 
   fs.renameSync(active, dest);
   entries = [];
+  resetSidCountersForArchive();
   return { archiveFile: path.join('sids', 'archive', base).replace(/\\/g, '/'), count: countToReport };
+}
+
+export type SidArchiveListItem = {
+  file: string;
+  archivedAt: number;
+  count: number;
+  sizeBytes: number;
+};
+
+/**
+ * Lists JSONL archives under `sids/archive/` (newest first). Line count is computed on read;
+ * for huge files this could be slow — archives are typically modest.
+ */
+export function listSidArchives(): SidArchiveListItem[] {
+  ensureSidsDir();
+  const archDir = path.join(sidsRoot(), 'archive');
+  if (!fs.existsSync(archDir)) return [];
+
+  const names = fs
+    .readdirSync(archDir)
+    .filter((f) => f.startsWith('sids-') && f.endsWith('.jsonl') && f === path.basename(f));
+
+  const out: SidArchiveListItem[] = [];
+  for (const file of names) {
+    const full = path.join(archDir, file);
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    let count = 0;
+    try {
+      const raw = fs.readFileSync(full, 'utf8');
+      count = raw.split(/\r?\n/).filter((l) => l.trim() !== '').length;
+    } catch {
+      count = 0;
+    }
+    out.push({ file, archivedAt: st.mtimeMs, count, sizeBytes: st.size });
+  }
+  out.sort((a, b) => b.archivedAt - a.archivedAt);
+  return out;
+}
+
+/**
+ * Reads one archive file (basename only). Throws if the name is unsafe or file missing.
+ */
+export function readSidArchive(basename: string): {
+  archivedAt: number;
+  count: number;
+  entries: StoredSidEntry[];
+} {
+  if (typeof basename !== 'string' || basename !== path.basename(basename) || basename.includes('..')) {
+    throw new Error('Invalid archive name');
+  }
+  if (!basename.startsWith('sids-') || !basename.endsWith('.jsonl')) {
+    throw new Error('Invalid archive name');
+  }
+  const archDir = path.resolve(path.join(sidsRoot(), 'archive'));
+  const full = path.resolve(path.join(archDir, basename));
+  const rel = path.relative(archDir, full);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error('Invalid archive path');
+  }
+  if (!fs.existsSync(full)) {
+    throw new Error('Archive not found');
+  }
+  const st = fs.statSync(full);
+  const raw = fs.readFileSync(full, 'utf8');
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim() !== '');
+  const entries: StoredSidEntry[] = [];
+  for (const line of lines) {
+    try {
+      entries.push(JSON.parse(line) as StoredSidEntry);
+    } catch {
+      /* skip bad line */
+    }
+  }
+  return { archivedAt: st.mtimeMs, count: entries.length, entries };
 }

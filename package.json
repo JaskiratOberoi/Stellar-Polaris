@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,magenta \"pnpm --filter @stellar/server dev\" \"pnpm --filter @stellar/web dev\"",
+    "dev": "concurrently -n server,web -c blue,magenta \"npx pnpm --filter @stellar/server dev\" \"npx pnpm --filter @stellar/web dev\"",
     "build": "pnpm --filter @stellar/shared build && pnpm --filter @stellar/server build && pnpm --filter @stellar/web build",
     "start": "pnpm --filter @stellar/server start",
     "lint": "eslint .",

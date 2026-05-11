@@ -12,6 +12,8 @@ type Props = {
   accent?: string;
   /** Small square grid cell for test codes (2–3 per row) */
   compact?: boolean;
+  /** Native tooltip (defaults to label + sublabel when sublabel is set) */
+  title?: string;
 };
 
 export function ControlTile({
@@ -23,8 +25,11 @@ export function ControlTile({
   className,
   accent,
   compact = false,
+  title: titleProp,
 }: Props) {
   const tileTransition = { type: 'spring' as const, stiffness: 450, damping: 28, mass: 0.5 };
+  const defaultTitle = sublabel ? `${label} · ${sublabel}` : label;
+  const buttonTitle = titleProp ?? defaultTitle;
 
   if (compact) {
     return (
@@ -32,7 +37,7 @@ export function ControlTile({
         type="button"
         id={id}
         aria-pressed={selected}
-        title={`${label}${sublabel ? ` · ${sublabel}` : ''}`}
+        title={titleProp ?? `${label}${sublabel ? ` · ${sublabel}` : ''}`}
         onClick={onToggle}
         whileHover={{ scale: 1.02, y: -1 }}
         whileTap={{ scale: 0.97 }}
@@ -88,36 +93,41 @@ export function ControlTile({
       type="button"
       id={id}
       aria-pressed={selected}
+      title={buttonTitle}
       onClick={onToggle}
       whileHover={{ scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
       transition={tileTransition}
       className={cn(
-        'signal-tile group flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-2.5 text-left transition-shadow duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sp-bg)]',
+        'signal-tile group flex w-full min-w-0 flex-col items-stretch gap-1.5 rounded-xl border px-3 py-3 text-left transition-shadow duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sp-bg)]',
         selected
           ? 'border-amber-500/50 bg-amber-500/15 text-zinc-50 shadow-[0_0_24px_-8px_rgba(245,158,11,0.45)]'
           : 'border-zinc-700/80 bg-zinc-950/40 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-900/50 hover:text-zinc-300',
         className
       )}
     >
-      <span className="flex w-full items-center justify-between gap-2">
-        {accent ? (
-          <motion.span
-            className={cn(
-              'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold uppercase tracking-wider',
-              selected ? 'bg-amber-500/25 text-amber-200' : 'bg-zinc-800 text-zinc-500'
-            )}
-            aria-hidden
-            animate={selected ? { scale: 1.05 } : { scale: 1 }}
-            transition={tileTransition}
-          >
-            {accent}
-          </motion.span>
-        ) : null}
-        <span className={cn('min-w-0 flex-1 text-sm font-medium', selected && 'text-zinc-50')}>{label}</span>
+      <span className="flex w-full min-w-0 items-start justify-between gap-2">
+        <span className="flex min-w-0 flex-1 items-start gap-2">
+          {accent ? (
+            <motion.span
+              className={cn(
+                'flex h-7 min-w-[1.75rem] shrink-0 items-center justify-center rounded-md px-1 text-[10px] font-bold uppercase tracking-wide',
+                selected ? 'bg-amber-500/25 text-amber-200' : 'bg-zinc-800 text-zinc-500'
+              )}
+              aria-hidden
+              animate={selected ? { scale: 1.05 } : { scale: 1 }}
+              transition={tileTransition}
+            >
+              {accent}
+            </motion.span>
+          ) : null}
+          <span className={cn('min-w-0 flex-1 text-sm font-medium leading-snug', selected && 'text-zinc-50')}>
+            {label}
+          </span>
+        </span>
         <motion.span
           className={cn(
-            'h-2 w-2 shrink-0 rounded-full',
+            'mt-0.5 h-2 w-2 shrink-0 rounded-full',
             selected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-zinc-600'
           )}
           title={selected ? 'On' : 'Off'}
@@ -125,7 +135,11 @@ export function ControlTile({
           transition={tileTransition}
         />
       </span>
-      {sublabel ? <span className="pl-0 text-[10px] font-mono text-zinc-500">{sublabel}</span> : null}
+      {sublabel ? (
+        <span className="block w-full min-w-0 pl-0 text-left text-[10px] font-normal leading-relaxed tracking-normal text-balance text-zinc-500">
+          {sublabel}
+        </span>
+      ) : null}
     </motion.button>
   );
 }

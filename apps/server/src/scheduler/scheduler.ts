@@ -3,6 +3,7 @@ import { broadcastRunEvent } from '../ws/runStream.js';
 import {
   launchRun,
   subscribeRunEnd,
+  subscribeRunStart,
   validateRunConfig,
   type RunState,
 } from '../routes/run.js';
@@ -21,6 +22,7 @@ let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
 let nextRunAt: number | null = null;
 let kickPending = false;
 let runEndUnsub: (() => void) | null = null;
+let runStartUnsub: (() => void) | null = null;
 
 function headlessFromConfig(c: RunConfig | null | undefined): boolean {
   return c == null || c.headless !== false;
@@ -126,10 +128,12 @@ async function kickLoop(): Promise<void> {
 
   blockedByOtherRun = false;
 
+  const runPromise = launchRun(runStateRef, config);
+  emitState();
   try {
-    await launchRun(runStateRef, config);
-  } catch (e) {
-    console.error('[stellar] scheduler: launchRun failed', e);
+    await runPromise;
+  } finally {
+    emitState();
   }
   if (!persisted.enabled) {
     clearCooldown();
@@ -148,7 +152,12 @@ async function kickLoop(): Promise<void> {
   scheduleCooldownAndEmit();
 }
 
+function onExternalRunStart(): void {
+  emitState();
+}
+
 function onExternalRunEnd(): void {
+  emitState();
   if (persisted.enabled && persisted.config && blockedByOtherRun) {
     void enqueueKick();
   }
@@ -162,6 +171,8 @@ export function initScheduler(runState: RunState): void {
   runStateRef = runState;
   if (runEndUnsub) runEndUnsub();
   runEndUnsub = subscribeRunEnd(onExternalRunEnd);
+  if (runStartUnsub) runStartUnsub();
+  runStartUnsub = subscribeRunStart(onExternalRunStart);
   emitState();
   if (persisted.enabled && persisted.config) {
     void enqueueKick();
@@ -236,6 +247,10 @@ export function destroySchedulerForTests(): void {
   if (runEndUnsub) {
     runEndUnsub();
     runEndUnsub = null;
+  }
+  if (runStartUnsub) {
+    runStartUnsub();
+    runStartUnsub = null;
   }
   clearCooldown();
 }

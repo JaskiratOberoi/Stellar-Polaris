@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import type { RunConfig, StoredSidEntry, TestCodeId, WorksheetTestHit, WsClientEvent } from '@stellar/shared';
-import { atLeastOneTestCodeOn, selectedTestCodesInOrder, TestCodeToggles } from './components/TestCodeToggles';
+import type {
+  RunConfig,
+  SidCountersSnapshot,
+  StoredSidEntry,
+  TestCodeId,
+  WorksheetTestHit,
+  WsClientEvent,
+} from '@stellar/shared';
+import { URINE_ROUTINE_CODE } from '@stellar/shared';
+import { atLeastOneTestCodeOn, selectedTestCodesInOrder, TestCodeToggles, VITAMIN_PANEL_TEST_CODES } from './components/TestCodeToggles';
 import { FiltersPanel } from './components/FiltersPanel';
 import { RunControls } from './components/RunControls';
 import { SidGrid } from './components/SidGrid';
+import { AuditPanel } from './components/AuditPanel';
 import {
   getActiveSids,
   getRunStatus,
   getScheduler,
+  getSidCounters,
   postArchiveSids,
   postRun,
   postStop,
@@ -16,6 +26,7 @@ import {
 } from './lib/api';
 import { SchedulerCard } from './components/SchedulerCard';
 import { connectRunWebSocket } from './lib/wsClient';
+import { SidCounterStrip } from './components/SidCounterStrip';
 import { ControlTile } from './components/ControlTile';
 import { ModeToggle } from './components/ModeToggle';
 import { MiniToggle } from './components/MiniToggle';
@@ -26,12 +37,15 @@ const initialEnabled: Record<TestCodeId, boolean> = {
   BI180: true,
   BI036: true,
   MS111: true,
+  // CP004 (Urine Routine) is not a vitamin-panel test code toggle; it has its
+  // own dedicated tile that drives `urineRoutineEnabled` on the run config.
+  CP004: false,
 };
 
 /** Client-side cap so the DOM stays bounded; server retains up to its own limit in `sids/active.jsonl`. */
-const MAX_SID_ENTRIES = 5000;
+const MAX_SID_UI = 2000;
 
-type ActiveView = 'results' | 'logs';
+type ActiveView = 'results' | 'logs' | 'audit';
 
 function parseHourField(s: string): number | null | undefined {
   if (!s.trim()) return undefined;
@@ -49,13 +63,16 @@ function buildRunConfig(
   fromHour: string,
   toHour: string,
   authenticate: boolean,
-  headed: boolean
+  headed: boolean,
+  urineRoutineEnabled: boolean
 ): RunConfig {
   const c: RunConfig = {
     testCodes,
     businessUnit: bu.trim() || 'QUGEN',
     statusLabels: statuses,
     headless: !headed,
+    /** Always send a boolean so the API never treats “urine only” as missing the flag. */
+    urineRoutineEnabled,
   };
   if (authenticate) c.authenticate = true;
   if (fromDate.trim()) c.fromDate = fromDate.trim();
@@ -122,6 +139,10 @@ export function App() {
   const [schedulerRemote, setSchedulerRemote] = useState<SchedulerSnapshot | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>('results');
   const [whatsappEnabled, setWhatsappEnabled] = useState(false);
+  const [urineRoutineEnabled, setUrineRoutineEnabled] = useState(false);
+  const [testCodeFilter, setTestCodeFilter] = useState<TestCodeId | null>(null);
+  const [auditListNonce, setAuditListNonce] = useState(0);
+  const [sidCounters, setSidCounters] = useState<SidCountersSnapshot | null>(null);
 
   function upsertSidEntry(
     prev: StoredSidEntry[],
@@ -204,8 +225,8 @@ export function App() {
           ev.authGateSkipped,
           ev.authGateReason
         );
-        if (out.length > MAX_SID_ENTRIES) {
-          return out.slice(-MAX_SID_ENTRIES);
+        if (out.length > MAX_SID_UI) {
+          return out.slice(-MAX_SID_UI);
         }
         return out;
       });
@@ -258,6 +279,7 @@ export function App() {
     if (ev.type === 'SID_LIST_ARCHIVED') {
       setEntries([]);
       setSkippedDedup(0);
+      setAuditListNonce((n) => n + 1);
       const msg =
         ev.count > 0 && ev.archiveFile
           ? `Archived ${ev.count} SID row(s) to ${ev.archiveFile}`
@@ -274,6 +296,13 @@ export function App() {
         nextRunAt: ev.nextRunAt,
         hasConfig: ev.hasConfig,
         headless: ev.headless,
+      });
+    }
+    if (ev.type === 'SID_COUNTERS') {
+      setSidCounters({
+        since: ev.since,
+        perCode: ev.perCode,
+        totalWorkedOnSids: ev.totalWorkedOnSids,
       });
     }
   }, []);
@@ -303,20 +332,53 @@ export function App() {
 
   useEffect(() => {
     getActiveSids()
-      .then((r) => setEntries(r.entries.slice(0, MAX_SID_ENTRIES)))
+      .then((r) => setEntries(r.entries.slice(0, MAX_SID_UI)))
+      .catch(() => {
+        /* dev server not up */
+      });
+  }, []);
+
+  useEffect(() => {
+    getSidCounters()
+      .then(setSidCounters)
       .catch(() => {
         /* dev server not up */
       });
   }, []);
 
   const canStart = useMemo(() => {
-    return atLeastOneTestCodeOn(enabled) && statusSelection.length > 0;
-  }, [enabled, statusSelection]);
+    return (atLeastOneTestCodeOn(enabled) || urineRoutineEnabled) && statusSelection.length > 0;
+  }, [enabled, statusSelection, urineRoutineEnabled]);
 
   const buildCurrentRunConfig = useCallback((): RunConfig => {
-    const testCodes = selectedTestCodesInOrder(enabled);
-    return buildRunConfig(testCodes, bu, statusSelection, fromDate, toDate, fromHour, toHour, authenticate, headed);
-  }, [enabled, bu, statusSelection, fromDate, toDate, fromHour, toHour, authenticate, headed]);
+    const vitaminCodes = selectedTestCodesInOrder(enabled);
+    /** Non-empty `testCodes` keeps older servers / proxies happy; CP004 is stripped for the vitamin sweep. */
+    const testCodes =
+      urineRoutineEnabled && vitaminCodes.length === 0 ? [URINE_ROUTINE_CODE] : vitaminCodes;
+    return buildRunConfig(
+      testCodes,
+      bu,
+      statusSelection,
+      fromDate,
+      toDate,
+      fromHour,
+      toHour,
+      authenticate,
+      headed,
+      urineRoutineEnabled
+    );
+  }, [
+    enabled,
+    bu,
+    statusSelection,
+    fromDate,
+    toDate,
+    fromHour,
+    toHour,
+    authenticate,
+    headed,
+    urineRoutineEnabled,
+  ]);
 
   const onStart = async () => {
     setErr(null);
@@ -404,11 +466,35 @@ export function App() {
             <TestCodeToggles
               enabled={enabled}
               onChange={(id, v) => setEnabled((e) => ({ ...e, [id]: v }))}
+              onClearAll={() =>
+                setEnabled((prev) => {
+                  const out = { ...prev };
+                  for (const code of VITAMIN_PANEL_TEST_CODES) {
+                    out[code] = false;
+                  }
+                  return out;
+                })
+              }
             />
             <div className="h-px bg-zinc-800/80" />
             <ModeToggle authenticate={authenticate} onAuthenticate={setAuthenticate} />
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <MiniToggle headless={!headed} onHeadless={(h) => setHeaded(!h)} className="justify-between sm:justify-start" />
+            </div>
+            <div className="h-px bg-zinc-800/80" />
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Bots</p>
+              <div className="mt-1.5">
+                <ControlTile
+                  id="bot-urine-routine"
+                  accent="CP004"
+                  label="Urine Routine"
+                  sublabel="Fills empty rows · Pus & Epi left blank"
+                  title="Opens the LIS worksheet for CP004 with your BU and status filters, walks every SID in the grid, fills default values on empty parameter rows, authenticates only those filled rows, and never touches Pus Cells or Epithelial Cells."
+                  selected={urineRoutineEnabled}
+                  onToggle={() => setUrineRoutineEnabled((v) => !v)}
+                />
+              </div>
             </div>
             <div className="h-px bg-zinc-800/80" />
             <div>
@@ -478,6 +564,9 @@ export function App() {
                     <span className="ml-1.5 font-mono text-zinc-500">({logs.length})</span>
                   ) : null}
                 </ViewTabButton>
+                <ViewTabButton id="tab-audit" active={activeView === 'audit'} onClick={() => setActiveView('audit')}>
+                  Audit
+                </ViewTabButton>
               </div>
 
               <div className="relative min-h-0 min-w-0 flex-1">
@@ -485,23 +574,31 @@ export function App() {
                   {activeView === 'results' ? (
                     <motion.div
                       key="results"
-                      className="absolute inset-0 flex min-h-0 min-w-0 flex-col"
+                      className="absolute inset-0 flex min-h-0 min-w-0 flex-col gap-2"
                       initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -4 }}
                       transition={{ duration: 0.2 }}
                     >
+                      <SidCounterStrip
+                        snapshot={sidCounters}
+                        testCodeFilter={testCodeFilter}
+                        onTestCodeFilterChange={setTestCodeFilter}
+                      />
                       <SidGrid
-                        className="h-full min-h-0"
+                        className="min-h-0 flex-1"
                         entries={entries}
                         skippedDedup={skippedDedup}
                         summary={summary}
-                        atCapacity={entries.length >= MAX_SID_ENTRIES}
+                        atCapacity={entries.length >= MAX_SID_UI}
+                        testCodeFilter={testCodeFilter}
+                        onTestCodeFilterChange={setTestCodeFilter}
                         running={running}
                         onArchive={onArchive}
                       />
                     </motion.div>
-                  ) : (
+                  ) : null}
+                  {activeView === 'logs' ? (
                     <motion.div
                       key="logs"
                       className="absolute inset-0 flex min-h-0 min-w-0 flex-col overflow-hidden"
@@ -525,7 +622,24 @@ export function App() {
                         )}
                       </div>
                     </motion.div>
-                  )}
+                  ) : null}
+                  {activeView === 'audit' ? (
+                    <motion.div
+                      key="audit"
+                      className="absolute inset-0 flex min-h-0 min-w-0 flex-col overflow-hidden"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <AuditPanel
+                        className="h-full min-h-0"
+                        listRefreshNonce={auditListNonce}
+                        testCodeFilter={testCodeFilter}
+                        onTestCodeFilterChange={setTestCodeFilter}
+                      />
+                    </motion.div>
+                  ) : null}
                 </AnimatePresence>
               </div>
             </div>

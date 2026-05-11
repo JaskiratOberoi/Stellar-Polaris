@@ -139,7 +139,83 @@ export async function setStatus(page: Page, statusLabel: string): Promise<boolea
   }
 }
 
-export async function setTestCode(page: Page, testCode: string): Promise<void> {
+function normWorksheetTestCode(s: string | null | undefined): string {
+  return String(s ?? '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
+}
+
+/** Reads the Sample Worksheet "test / code" filter input (txtTestcode…). */
+export async function getWorksheetTestCodeFilterValue(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const lower = (s: string | null | undefined) => String(s ?? '').toLowerCase();
+    const candidates = Array.from(document.querySelectorAll('input, textarea')) as (
+      | HTMLInputElement
+      | HTMLTextAreaElement
+    )[];
+    const el = candidates.find((e) => {
+      const id = lower(e.id);
+      const nm = lower(e.getAttribute('name'));
+      return id.includes('txttestcode') || nm.includes('txttestcode');
+    });
+    if (!el) return null;
+    return String(el.value ?? '').trim();
+  });
+}
+
+/**
+ * Some LIS builds only apply the test-code filter after the field loses focus
+ * (blur / Tab). Call this after `setTestCode` and before `clickSearch`.
+ */
+export async function commitWorksheetTestCodeFilter(page: Page): Promise<boolean> {
+  const focused = await page.evaluate(() => {
+    const lower = (s: string | null | undefined) => String(s ?? '').toLowerCase();
+    const candidates = Array.from(document.querySelectorAll('input, textarea')) as (
+      | HTMLInputElement
+      | HTMLTextAreaElement
+    )[];
+    const el = candidates.find((e) => {
+      const id = lower(e.id);
+      const nm = lower(e.getAttribute('name'));
+      return id.includes('txttestcode') || nm.includes('txttestcode');
+    });
+    if (!el || (el as HTMLInputElement).disabled) return false;
+    el.focus();
+    return true;
+  });
+  if (!focused) return false;
+  await page.keyboard.press('Tab');
+  await delayMs(450);
+  return true;
+}
+
+/**
+ * Ensures the worksheet filter input shows `want` (e.g. CP004) before running Search.
+ * Re-applies when date/status postbacks clear it. Returns whether read-back matches.
+ */
+export async function ensureWorksheetTestCodeFilter(
+  page: Page,
+  want: string
+): Promise<{ ok: boolean; readBack: string | null }> {
+  const wantN = normWorksheetTestCode(want);
+  let readBack = await getWorksheetTestCodeFilterValue(page);
+  if (normWorksheetTestCode(readBack) !== wantN) {
+    const setOk = await setTestCode(page, want);
+    if (!setOk) return { ok: false, readBack };
+  }
+  await commitWorksheetTestCodeFilter(page);
+  readBack = await getWorksheetTestCodeFilterValue(page);
+  if (normWorksheetTestCode(readBack) !== wantN) {
+    await setTestCode(page, want);
+    await commitWorksheetTestCodeFilter(page);
+    readBack = await getWorksheetTestCodeFilterValue(page);
+  }
+  return { ok: normWorksheetTestCode(readBack) === wantN, readBack };
+}
+
+export async function setTestCode(page: Page, testCode: string): Promise<boolean> {
   const filled = await page.evaluate((code: string) => {
     const lower = (s: string | null | undefined) => String(s ?? '').toLowerCase();
     const candidates = Array.from(document.querySelectorAll('input, textarea')) as (
@@ -163,21 +239,28 @@ export async function setTestCode(page: Page, testCode: string): Promise<void> {
   }, testCode);
   if (filled) {
     await delayMs(180);
-    return;
+    return true;
   }
 
-  await typeElement(
-    page,
-    [
-      "//input[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
-      "//input[contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
-      "//textarea[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
-      "//textarea[contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
-      "//input[contains(@id, 'txtTestcode')]",
-      "//input[contains(@name, 'txtTestcode')]",
-    ],
-    testCode
-  );
+  try {
+    await typeElement(
+      page,
+      [
+        "//input[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+        "//input[contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+        "//textarea[contains(translate(@id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+        "//textarea[contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'txttestcode')]",
+        "//input[contains(@id, 'txtTestcode')]",
+        "//input[contains(@name, 'txtTestcode')]",
+      ],
+      testCode
+    );
+    await delayMs(180);
+    return true;
+  } catch {
+    console.warn(`Could not set worksheet test code to "${testCode}".`);
+    return false;
+  }
 }
 
 async function setWorksheetFromTimeHour(page: Page, hour: number): Promise<boolean> {

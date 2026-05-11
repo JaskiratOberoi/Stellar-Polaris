@@ -11,6 +11,7 @@ import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSidRoutes } from './routes/sids.js';
 import { setRuntimePathsForProcess } from './runtime/paths.js';
 import { destroySchedulerForTests, initScheduler } from './scheduler/scheduler.js';
+import { initSidCounters } from './sids/sidCounters.js';
 import { initSidStore } from './sids/sidStore.js';
 import { attachRunStreamWss } from './ws/runStream.js';
 
@@ -76,6 +77,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Starte
   }
 
   initSidStore();
+  initSidCounters();
 
   const port = opts.port ?? (Number(process.env.PORT) || 4400);
 

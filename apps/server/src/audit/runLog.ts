@@ -149,6 +149,10 @@ export function recordEvent(ev: WsClientEvent): void {
       return;
     }
 
+    if (ev.type === 'SID_COUNTERS') {
+      return;
+    }
+
     if (ev.type === 'RUN_STARTED') {
       const { runId } = ev;
       const existing = runStreams.get(runId);

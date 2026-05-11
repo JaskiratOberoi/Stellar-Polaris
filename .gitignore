@@ -6,6 +6,8 @@ dist
 apps/web/dist
 apps/server/data/
 release
+release-build-*/
+release-staging/
 electron/dist
 build/chromium-bundle
 *.tsbuildinfo

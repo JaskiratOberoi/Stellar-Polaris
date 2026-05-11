@@ -2,8 +2,9 @@ import type { RunConfig, TestCodeId } from '@stellar/shared';
 import { randomUUID } from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 import { runVitaminPanelScan } from '../bot/vitaminPanelBot.js';
+import { runUrineRoutineScan } from '../bot/urineRoutineBot.js';
 import { broadcastRunEvent } from '../ws/runStream.js';
-import { isTestCodeId } from '../config/testCodes.js';
+import { isTestCodeId, URINE_ROUTINE } from '../config/testCodes.js';
 import { WORKSHEET_STATUS_OPTIONS } from '../config/statuses.js';
 import { resolveLisCredentialsFromEnv } from '../config/credentials.js';
 
@@ -17,6 +18,7 @@ export type RunState = {
 };
 
 const runEndListeners = new Set<() => void>();
+const runStartListeners = new Set<() => void>();
 
 /** Called from `launchRun` `finally` so the scheduler can re-kick after manual runs. */
 function notifyRunEnd(): void {
@@ -27,6 +29,26 @@ function notifyRunEnd(): void {
       /* ignore */
     }
   }
+}
+
+function notifyRunStart(): void {
+  for (const fn of runStartListeners) {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Register a callback invoked whenever a run starts (`beginRun`).
+ */
+export function subscribeRunStart(fn: () => void): () => void {
+  runStartListeners.add(fn);
+  return () => {
+    runStartListeners.delete(fn);
+  };
 }
 
 /**
@@ -46,13 +68,39 @@ export function validateRunConfig(body: unknown): { ok: true; config: RunConfig 
   }
   const b = body as Record<string, unknown>;
   const testCodes = b.testCodes;
-  if (!Array.isArray(testCodes) || testCodes.length === 0) {
-    return { ok: false, error: 'testCodes must be a non-empty array' };
+  const urineRoutineRaw = b.urineRoutineEnabled;
+  let urineRoutineEnabled =
+    urineRoutineRaw === true ||
+    urineRoutineRaw === 1 ||
+    (typeof urineRoutineRaw === 'string' &&
+      ['true', '1', 'yes', 'on'].includes(urineRoutineRaw.trim().toLowerCase()));
+  if (!Array.isArray(testCodes)) {
+    return { ok: false, error: 'testCodes must be an array' };
+  }
+  /** Client may send `testCodes: ['CP004']` alone so the array is never empty; treat as urine run. */
+  const onlyUrineRoutineCode =
+    testCodes.length > 0 &&
+    testCodes.every((c) => typeof c === 'string' && String(c).trim() === URINE_ROUTINE);
+  if (onlyUrineRoutineCode) {
+    urineRoutineEnabled = true;
+  }
+  if (testCodes.length === 0 && !urineRoutineEnabled) {
+    return {
+      ok: false,
+      error:
+        'Enable at least one test code, or turn on Urine Routine (CP004), or both — testCodes cannot be empty unless the urine routine bot is enabled.',
+    };
   }
   const codes: TestCodeId[] = [];
   for (const c of testCodes) {
     if (typeof c !== 'string' || !isTestCodeId(c)) {
       return { ok: false, error: `Invalid test code: ${String(c)}` };
+    }
+    if (c === URINE_ROUTINE) {
+      // CP004 is driven by `urineRoutineEnabled`, not by the testCodes array,
+      // so the vitamin panel scan never sees it. Drop silently if a client
+      // accidentally includes it.
+      continue;
     }
     codes.push(c);
   }
@@ -85,6 +133,7 @@ export function validateRunConfig(body: unknown): { ok: true; config: RunConfig 
     toHour,
     headless,
     authenticate,
+    urineRoutineEnabled,
     credentials: { username, password },
     loginUrls: {
       primary: process.env.LIS_PRIMARY_URL,
@@ -117,6 +166,7 @@ export function beginRun(state: RunState): string {
   state.startedAt = Date.now();
   state.controller = controller;
   broadcastRunEvent({ type: 'RUN_STARTED', runId });
+  notifyRunStart();
   return runId;
 }
 
@@ -129,8 +179,20 @@ export async function executeRun(state: RunState, runId: string, config: RunConf
   }
   const signal = state.controller.signal;
   const emit = (ev: Parameters<typeof broadcastRunEvent>[0]) => broadcastRunEvent(ev);
+  const headed = config.headless === false;
+  emit({
+    type: 'LOG',
+    level: 'info',
+    message: `Run pipeline starting (${headed ? 'visible browser' : 'headless'}). The next lines appear after Chromium launches.`,
+    ts: Date.now(),
+  });
   try {
-    await runVitaminPanelScan({ runId, config, signal, emit });
+    if (config.testCodes.length > 0) {
+      await runVitaminPanelScan({ runId, config, signal, emit });
+    }
+    if (!signal.aborted && config.urineRoutineEnabled) {
+      await runUrineRoutineScan({ runId, config, signal, emit });
+    }
     if (signal.aborted) {
       broadcastRunEvent({ type: 'RUN_STOPPED', runId });
     } else {

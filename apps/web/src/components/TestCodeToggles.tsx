@@ -5,15 +5,32 @@ import { cn } from '@/lib/utils';
 
 const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111'];
 
+/** Vitamin-panel tiles only (same as sidebar `ORDER`); CP004 is the Urine Routine tile. */
+export const VITAMIN_PANEL_TEST_CODES: TestCodeId[] = ORDER;
+
 export function TestCodeToggles(props: {
   enabled: Record<TestCodeId, boolean>;
   onChange: (id: TestCodeId, value: boolean) => void;
+  onClearAll?: () => void;
   className?: string;
 }) {
-  const { enabled, onChange, className } = props;
+  const { enabled, onChange, onClearAll, className } = props;
+  const anyVitaminOn = ORDER.some((id) => enabled[id]);
   return (
     <div className={cn('flex flex-col gap-2', className)}>
-      <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Tests (order)</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">Tests (order)</p>
+        {onClearAll ? (
+          <button
+            type="button"
+            onClick={onClearAll}
+            disabled={!anyVitaminOn}
+            className="rounded-md border border-zinc-700/80 bg-zinc-950/80 px-2 py-0.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            None
+          </button>
+        ) : null}
+      </div>
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
         {ORDER.map((id) => (
           <ControlTile

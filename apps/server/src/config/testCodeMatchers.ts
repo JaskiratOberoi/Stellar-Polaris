@@ -1,5 +1,13 @@
 import type { TestCodeId } from '@stellar/shared';
-import { ANTI_CCP, B12, PROLACTIN, RA_FACTOR, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
+import {
+  ANTI_CCP,
+  B12,
+  PROLACTIN,
+  RA_FACTOR,
+  TOTAL_IGE,
+  URINE_ROUTINE,
+  VITAMIN_D,
+} from './testCodes.js';
 
 /**
  * Display-name patterns used to recognise an enabled test in a SID's worksheet
@@ -30,6 +38,11 @@ export const TEST_CODE_NAME_PATTERNS: Record<TestCodeId, RegExp[]> = {
   [PROLACTIN]: [/\bprolactin\b/i],
   [ANTI_CCP]: [/\banti\s*[- ]?\s*ccp\b/i, /\bcyclic\s+citrullinated\s+peptide\b/i],
   [RA_FACTOR]: [/\bra\s*[- ]?\s*factor\b/i, /\brheumatoid(?:\s+arthritis)?\s+factor\b/i],
+  // Urine Routine (CP004) is a panel test driven by the urineRoutineBot which
+  // matches each row by `URINE_ROUTINE_FIELD_ALIASES`, not by panel name. The
+  // vitamin panel `matchTestCode` should never return CP004, so this list is
+  // intentionally empty.
+  [URINE_ROUTINE]: [],
 };
 
 /**

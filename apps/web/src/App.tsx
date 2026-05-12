@@ -37,6 +37,8 @@ const initialEnabled: Record<TestCodeId, boolean> = {
   BI180: true,
   BI036: true,
   MS111: true,
+  BI034: true,
+  BI181: true,
   // CP004 (Urine Routine) is not a vitamin-panel test code toggle; it has its
   // own dedicated tile that drives `urineRoutineEnabled` on the run config.
   CP004: false,
@@ -460,7 +462,7 @@ export function App() {
             <div>
               <h2 className="text-sm font-semibold text-zinc-100">Test codes</h2>
               <p className="text-[10px] leading-relaxed text-zinc-500">
-                Order: BI235 → BI005 → BI133 → BI180 → BI036 → MS111
+                Order: BI235 → BI005 → BI133 → BI180 → BI036 → MS111 → BI034 → BI181
               </p>
             </div>
             <TestCodeToggles

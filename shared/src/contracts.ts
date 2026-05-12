@@ -6,6 +6,8 @@ export type TestCodeId =
   | 'BI180'
   | 'BI036'
   | 'MS111'
+  | 'BI034'
+  | 'BI181'
   | 'CP004';
 
 export const TEST_CODE_LABELS: Record<TestCodeId, string> = {
@@ -15,6 +17,8 @@ export const TEST_CODE_LABELS: Record<TestCodeId, string> = {
   BI180: 'Prolactin',
   BI036: 'Anti-CCP',
   MS111: 'RA Factor',
+  BI034: 'AMH',
+  BI181: 'Total PSA',
   CP004: 'Urine Routine',
 };
 
@@ -22,7 +26,7 @@ export const TEST_CODE_LABELS: Record<TestCodeId, string> = {
 export const URINE_ROUTINE_CODE: TestCodeId = 'CP004';
 
 export interface RunConfig {
-  /** Which test codes to scan, in order (e.g. BI235 → BI005 → BI133 → BI180 → BI036 → MS111). */
+  /** Which test codes to scan, in order (e.g. BI235 → BI005 → BI133 → BI180 → BI036 → MS111 → BI034 → BI181). */
   testCodes: TestCodeId[];
   businessUnit: string;
   statusLabels: string[];

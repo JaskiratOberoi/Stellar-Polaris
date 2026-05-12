@@ -9,7 +9,7 @@ function shortRunId(runId: string): string {
   return runId.length > 12 ? `${runId.slice(0, 8)}…` : runId;
 }
 
-const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'CP004'];
+const TEST_CODE_ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'BI034', 'BI181', 'CP004'];
 
 /** @deprecated Use StoredSidEntry from @stellar/shared */
 export type SidEntry = StoredSidEntry;

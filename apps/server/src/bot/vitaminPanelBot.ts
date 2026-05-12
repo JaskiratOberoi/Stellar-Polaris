@@ -35,6 +35,7 @@ import {
   antiCcpNamePatternSources,
   b12NamePatternSources,
   decideAntiCcp,
+  decideAmh,
   decideB12,
   decideProlactin,
   decideRaFactor,
@@ -43,6 +44,13 @@ import {
   HIGH_COMMENT,
   IGE_HIGH_COMMENT,
   igENamePatternSources,
+  AMH_HOLD_COMMENT,
+  AMH_INLINE_COMMENT,
+  amhNamePatternSources,
+  decideTotalPsa,
+  PSA_HOLD_COMMENT,
+  PSA_INLINE_COMMENT,
+  totalPsaNamePatternSources,
   PROLACTIN_COMPANION_PATTERN_SOURCES,
   PROLACTIN_HOLD_COMMENT,
   PROLACTIN_INLINE_COMMENT,
@@ -54,7 +62,7 @@ import {
   parseAgeSex,
   vitDNamePatternSources,
 } from '../config/authRules.js';
-import { ANTI_CCP, B12, PROLACTIN, RA_FACTOR, TOTAL_IGE, VITAMIN_D } from '../config/testCodes.js';
+import { ANTI_CCP, AMH, B12, PROLACTIN, RA_FACTOR, TOTAL_IGE, TOTAL_PSA, VITAMIN_D } from '../config/testCodes.js';
 import {
   clickSaveAndSettle,
   ensureHoldComment,
@@ -218,6 +226,8 @@ export async function runVitaminPanelScan(options: {
     const prolactinNamePatterns = prolactinNamePatternSources();
     const antiCcpNamePatterns = antiCcpNamePatternSources();
     const raFactorNamePatterns = raFactorNamePatternSources();
+    const amhNamePatterns = amhNamePatternSources();
+    const totalPsaNamePatterns = totalPsaNamePatternSources();
     const companionRe = PROLACTIN_COMPANION_PATTERN_SOURCES.map((s) => new RegExp(s, 'i'));
     let modalsOpened = 0;
     let modalsSkipped = 0;
@@ -345,12 +355,20 @@ export async function runVitaminPanelScan(options: {
               const raFactorPresent = eligibleSet.has(RA_FACTOR);
               const raFactorHasCompanions =
                 raFactorPresent && (eligibleSet.size > 1 || otherTestRowsRaw.length > 0);
+              const amhPresent = eligibleSet.has(AMH);
+              const amhHasCompanions =
+                amhPresent && (eligibleSet.size > 1 || otherTestRowsRaw.length > 0);
+              const psaPresent = eligibleSet.has(TOTAL_PSA);
+              const psaHasCompanions =
+                psaPresent && (eligibleSet.size > 1 || otherTestRowsRaw.length > 0);
               const gateBlocked =
                 hasOtherTests ||
                 igeMixed ||
                 prolactinMixed ||
                 antiCcpHasCompanions ||
-                raFactorHasCompanions;
+                raFactorHasCompanions ||
+                amhHasCompanions ||
+                psaHasCompanions;
               const gateReason = hasOtherTests
                 ? (() => {
                     const names = [...new Set(otherTestRows.map((r) => r.rawName))];
@@ -365,7 +383,13 @@ export async function runVitaminPanelScan(options: {
                     ? 'auth gate: Prolactin cannot be authenticated alongside B12 / Vit D / IgE (manual review)'
                     : antiCcpHasCompanions
                       ? 'auth gate: Anti-CCP must be the only test in the worksheet (manual review)'
-                      : 'auth gate: RA Factor must be the only test in the worksheet (manual review)';
+                      : raFactorHasCompanions
+                        ? 'auth gate: RA Factor must be the only test in the worksheet (manual review)'
+                        : amhHasCompanions
+                          ? 'auth gate: AMH must be the only test in the worksheet (manual review)'
+                          : psaHasCompanions
+                            ? 'auth gate: Total PSA must be the only test in the worksheet (manual review)'
+                            : 'auth gate: worksheet requires manual review';
 
               const needB12Auth = enabledCodes.has(B12) && deduped.some((t) => t.testCode === B12);
               const needVitDAuth = enabledCodes.has(VITAMIN_D) && deduped.some((t) => t.testCode === VITAMIN_D);
@@ -377,6 +401,10 @@ export async function runVitaminPanelScan(options: {
                 enabledCodes.has(ANTI_CCP) && deduped.some((t) => t.testCode === ANTI_CCP);
               const needRaFactorAuth =
                 enabledCodes.has(RA_FACTOR) && deduped.some((t) => t.testCode === RA_FACTOR);
+              const needAmhAuth =
+                enabledCodes.has(AMH) && deduped.some((t) => t.testCode === AMH);
+              const needTotalPsaAuth =
+                enabledCodes.has(TOTAL_PSA) && deduped.some((t) => t.testCode === TOTAL_PSA);
 
               type AuthEval = { testCode: TestCodeId; decision: B12AuthKind; reason: string };
               const evals: AuthEval[] = [];
@@ -389,7 +417,9 @@ export async function runVitaminPanelScan(options: {
                   needIgEAuth ||
                   needProlactinAuth ||
                   needAntiCcpAuth ||
-                  needRaFactorAuth)
+                  needRaFactorAuth ||
+                  needAmhAuth ||
+                  needTotalPsaAuth)
               ) {
                 const ageText = await readPatientAgeSex(page);
                 const parsed = parseAgeSex(ageText);
@@ -414,6 +444,12 @@ export async function runVitaminPanelScan(options: {
                 }
                 if (needRaFactorAuth) {
                   evals.push({ testCode: RA_FACTOR, decision: 'skip', reason: gateReason });
+                }
+                if (needAmhAuth) {
+                  evals.push({ testCode: AMH, decision: 'skip', reason: gateReason });
+                }
+                if (needTotalPsaAuth) {
+                  evals.push({ testCode: TOTAL_PSA, decision: 'skip', reason: gateReason });
                 }
                 if (evals.length > 0) log(emit, 'warn', `SID ${sid}: ${gateReason}`);
               } else {
@@ -532,6 +568,58 @@ export async function runVitaminPanelScan(options: {
                     }
                   }
                 }
+                if (needAmhAuth) {
+                  const amhHit = deduped.find((t) => t.testCode === AMH)!;
+                  log(
+                    emit,
+                    'info',
+                    `SID ${sid} AMH (BI034): row="${amhHit.rawName}" value="${amhHit.value ?? ''}"`
+                  );
+                  if (await isRowAuthed(page, amhNamePatterns)) {
+                    evals.push({
+                      testCode: AMH,
+                      decision: 'already-authed',
+                      reason: 'AMH row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideAmh(amhHit.value, ageMonths, sex);
+                    const decision = planKindToAuth(d);
+                    evals.push({ testCode: AMH, decision, reason: d.reason });
+                    if (decision === 'skip' || decision === 'high-comment') {
+                      log(
+                        emit,
+                        'warn',
+                        `SID ${sid} AMH (BI034): ${decision} — ${d.reason} (manual review)`
+                      );
+                    }
+                  }
+                }
+                if (needTotalPsaAuth) {
+                  const psaHit = deduped.find((t) => t.testCode === TOTAL_PSA)!;
+                  log(
+                    emit,
+                    'info',
+                    `SID ${sid} Total PSA (BI181): row="${psaHit.rawName}" value="${psaHit.value ?? ''}"`
+                  );
+                  if (await isRowAuthed(page, totalPsaNamePatterns)) {
+                    evals.push({
+                      testCode: TOTAL_PSA,
+                      decision: 'already-authed',
+                      reason: 'Total PSA row already authenticated in LIS',
+                    });
+                  } else {
+                    const d = decideTotalPsa(psaHit.value, sex);
+                    const decision = planKindToAuth(d);
+                    evals.push({ testCode: TOTAL_PSA, decision, reason: d.reason });
+                    if (decision === 'skip' || decision === 'high-comment') {
+                      log(
+                        emit,
+                        'warn',
+                        `SID ${sid} Total PSA (BI181): ${decision} — ${d.reason} (manual review)`
+                      );
+                    }
+                  }
+                }
               }
               for (const e of evals) {
                 if (e.decision === 'defer') acc.delete(e.testCode);
@@ -589,6 +677,33 @@ export async function runVitaminPanelScan(options: {
                           savePending = true;
                         }
                       }
+                    } else if (e.testCode === AMH) {
+                      if (e.decision === 'auth-inline-comment') {
+                        const tick = await tickRowAuthResult(page, amhNamePatterns);
+                        if (!tick.ok) {
+                          applied.set(e.testCode, false);
+                          log(emit, 'warn', `SID ${sid} ${e.testCode}: chkAuth not found (AMH auth+inline)`);
+                        } else {
+                          const r = await ensureInlineComment(page, amhNamePatterns, AMH_INLINE_COMMENT);
+                          if (r === 'missing') {
+                            applied.set(e.testCode, false);
+                            log(
+                              emit,
+                              'warn',
+                              `SID ${sid} ${e.testCode}: inline Comments not found (AMH auth+inline)`
+                            );
+                          } else {
+                            applied.set(e.testCode, true);
+                            if (tick.changed || r === 'appended' || r === 'set') {
+                              savePending = true;
+                            }
+                          }
+                        }
+                      } else {
+                        const ok = await tickRowAuth(page, amhNamePatterns);
+                        applied.set(e.testCode, ok);
+                        if (ok) savePending = true;
+                      }
                     } else {
                       const pats =
                         e.testCode === B12
@@ -599,7 +714,9 @@ export async function runVitaminPanelScan(options: {
                               ? igeNamePatterns
                               : e.testCode === ANTI_CCP
                                 ? antiCcpNamePatterns
-                                : raFactorNamePatterns;
+                                : e.testCode === TOTAL_PSA
+                                  ? totalPsaNamePatterns
+                                  : raFactorNamePatterns;
                       const ok = await tickRowAuth(page, pats);
                       applied.set(e.testCode, ok);
                       if (ok) savePending = true;
@@ -692,6 +809,41 @@ export async function runVitaminPanelScan(options: {
                       }
                       if (!rowOk) {
                         log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (RA Factor high)`);
+                      }
+                      if (
+                        sampleR === 'appended' ||
+                        sampleR === 'set' ||
+                        rowR === 'appended' ||
+                        rowR === 'set'
+                      ) {
+                        savePending = true;
+                      }
+                    } else if (e.testCode === AMH) {
+                      // AMH high (female > 6.8): hold `?History` only — no chkAuth, no inline.
+                      const sampleR = await ensureHoldComment(page, AMH_HOLD_COMMENT);
+                      const sampleOk = sampleR !== 'missing';
+                      applied.set(e.testCode, sampleOk);
+                      if (!sampleOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: hold Comments not found (AMH high)`);
+                      }
+                      if (sampleR === 'appended' || sampleR === 'set') {
+                        savePending = true;
+                      }
+                    } else if (e.testCode === TOTAL_PSA) {
+                      const sampleR = await ensureHoldComment(page, PSA_HOLD_COMMENT);
+                      const rowR = await ensureInlineComment(
+                        page,
+                        totalPsaNamePatterns,
+                        PSA_INLINE_COMMENT
+                      );
+                      const sampleOk = sampleR !== 'missing';
+                      const rowOk = rowR !== 'missing';
+                      applied.set(e.testCode, sampleOk && rowOk);
+                      if (!sampleOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: hold Comments not found (Total PSA high)`);
+                      }
+                      if (!rowOk) {
+                        log(emit, 'warn', `SID ${sid} ${e.testCode}: inline Comments not found (Total PSA high)`);
                       }
                       if (
                         sampleR === 'appended' ||

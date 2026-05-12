@@ -1,10 +1,12 @@
 import type { TestCodeId } from '@stellar/shared';
 import {
+  AMH,
   ANTI_CCP,
   B12,
   PROLACTIN,
   RA_FACTOR,
   TOTAL_IGE,
+  TOTAL_PSA,
   URINE_ROUTINE,
   VITAMIN_D,
 } from './testCodes.js';
@@ -38,6 +40,15 @@ export const TEST_CODE_NAME_PATTERNS: Record<TestCodeId, RegExp[]> = {
   [PROLACTIN]: [/\bprolactin\b/i],
   [ANTI_CCP]: [/\banti\s*[- ]?\s*ccp\b/i, /\bcyclic\s+citrullinated\s+peptide\b/i],
   [RA_FACTOR]: [/\bra\s*[- ]?\s*factor\b/i, /\brheumatoid(?:\s+arthritis)?\s+factor\b/i],
+  [AMH]: [
+    /\banti\s*[- ]?\s*m(?:ü|u)llerian\s+hormone\b/i,
+    /\bamh\b/i,
+  ],
+  [TOTAL_PSA]: [
+    /\btotal\s*psa\b/i,
+    /\bpsa\s*[, ]*\s*total\b/i,
+    /\bprostate\s+specific\s+antigen(?:\s*[, ]*\s*total)?\b/i,
+  ],
   // Urine Routine (CP004) is a panel test driven by the urineRoutineBot which
   // matches each row by `URINE_ROUTINE_FIELD_ALIASES`, not by panel name. The
   // vitamin panel `matchTestCode` should never return CP004, so this list is

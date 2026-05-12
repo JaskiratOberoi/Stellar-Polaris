@@ -12,6 +12,31 @@ function sanitizeListecChromeRoleForArg(): string | null {
   return raw;
 }
 
+/**
+ * Return a Chrome `userDataDir` that lives OUTSIDE `~/Library/Application Support`.
+ *
+ * Background: macOS TCC denies `getxattr`/`setxattr` on
+ * `~/Library/Application Support/Google/Chrome for Testing/Crashpad`, which is
+ * the default user-data-dir when Puppeteer launches "Chrome for Testing".
+ * That floods stderr with `xattr.cc` errors and (on some Chrome versions)
+ * prevents the browser from coming up. Pointing `userDataDir` at a path under
+ * `os.tmpdir()` sidesteps the TCC-protected location entirely.
+ *
+ * The directory is persistent (we do NOT delete it between launches) so the
+ * profile is reused, but it is pid-scoped so two concurrent server processes
+ * don't fight over the same profile lock.
+ */
+function getStellarUserDataDir(): string {
+  const role = sanitizeListecChromeRoleForArg() || 'default';
+  const dir = path.join(os.tmpdir(), `stellar-puppeteer-${role}-${process.pid}`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    /* best-effort; Puppeteer will surface a clearer error if it really can't write */
+  }
+  return dir;
+}
+
 function isLowMemoryHost(): boolean {
   if (process.env.STELLAR_LOW_MEMORY === '0') return false;
   if (process.env.STELLAR_LOW_MEMORY === '1') return true;
@@ -56,7 +81,22 @@ export function buildStellarPuppeteerLaunchOptions(
     );
   }
 
+  /**
+   * Avoid Crashpad touching `~/Library/.../Chrome for Testing/Crashpad` (fails on
+   * macOS with getxattr/setxattr EPERM under TCC). Belt-and-braces: disable both
+   * the legacy Breakpad reporter AND the Crashpad reporter, suppress upload, and
+   * keep error dialogs from popping in headed mode.
+   */
+  const crashReporterMitigation = [
+    '--disable-breakpad',
+    '--disable-crash-reporter',
+    '--disable-features=Crashpad',
+    '--no-crash-upload',
+    '--noerrdialogs',
+  ];
+
   const headlessArgs = [
+    ...crashReporterMitigation,
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--window-size=1920,1080',
@@ -69,7 +109,7 @@ export function buildStellarPuppeteerLaunchOptions(
     headlessArgs.push(...chromiumLowMemoryArgs());
   }
 
-  const headedArgs = ['--start-maximized'];
+  const headedArgs = [...crashReporterMitigation, '--start-maximized'];
   if (lowMem) {
     headedArgs.push(...chromiumLowMemoryArgs());
   }
@@ -77,10 +117,13 @@ export function buildStellarPuppeteerLaunchOptions(
   const listecRole = sanitizeListecChromeRoleForArg();
   const roleArg = listecRole ? [`--listec-chrome-role=${listecRole}`] : [];
 
+  const userDataDir = overrides.userDataDir ?? getStellarUserDataDir();
+
   return {
     headless: isHeadless,
     defaultViewport: null,
     args: [...(isHeadless ? headlessArgs : headedArgs), ...roleArg],
+    userDataDir,
     ...overrides,
   };
 }
@@ -184,11 +227,18 @@ export function resolveChromeForStellarLaunch(): string | null {
 }
 
 export function getChromeInstallHint(): string {
+  const macCrashpad =
+    process.platform === 'darwin'
+      ? ' On macOS, the bot already redirects Chrome\'s user-data-dir to os.tmpdir() to avoid the Crashpad/getxattr "Operation not permitted" failure under ~/Library/Application Support. If you still hit it, install Google Chrome and point CHROME_PATH or CHROMIUM_EXECUTABLE_PATH at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome.'
+      : '';
   return [
     'No Chrome/Chromium binary found. Fix one of:',
     '(1) From repo root: pnpm run puppeteer:install-chrome  (puppeteer CLI lives in apps/server, not the root)',
-    '(2) Install Google Chrome (or set CHROMIUM_EXECUTABLE_PATH to your chrome or chromium binary)',
-  ].join(' ');
+    '(2) Install Google Chrome (or set CHROMIUM_EXECUTABLE_PATH / CHROME_PATH to your chrome or chromium binary).',
+    macCrashpad,
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function applyChromiumExecutablePathEnv(launchOptions: LaunchOptions): string | undefined {

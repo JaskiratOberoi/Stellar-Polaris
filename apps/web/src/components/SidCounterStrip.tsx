@@ -2,7 +2,7 @@ import type { SidCountersSnapshot, TestCodeId } from '@stellar/shared';
 import { TEST_CODE_LABELS } from '@stellar/shared';
 import { cn } from '@/lib/utils';
 
-const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'CP004'];
+const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'BI034', 'BI181', 'CP004'];
 
 export type SidCounterStripProps = {
   snapshot: SidCountersSnapshot | null;

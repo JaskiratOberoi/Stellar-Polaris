@@ -1,4 +1,4 @@
-import { ANTI_CCP, B12, PROLACTIN, RA_FACTOR, TOTAL_IGE, VITAMIN_D } from './testCodes.js';
+import { AMH, ANTI_CCP, B12, PROLACTIN, RA_FACTOR, TOTAL_IGE, TOTAL_PSA, VITAMIN_D } from './testCodes.js';
 import { TEST_CODE_NAME_PATTERNS } from './testCodeMatchers.js';
 
 /** Inline (per-test row) B12 / Vit D Comments — `txtComments` — when value is out of range high. */
@@ -30,6 +30,162 @@ export const RA_FACTOR_HOLD_COMMENT = '? History';
 export const RA_FACTOR_AUTH_UPPER = 14.0;
 /** Values strictly above this get hold + inline. Band [AUTH_UPPER, HIGH_THRESHOLD] is manual review skip. */
 export const RA_FACTOR_HIGH_THRESHOLD = 20.0;
+
+export const AMH_INLINE_COMMENT = 'Result Rechecked, Kindly correlate clinically';
+/** Hold (modal top-right `txtSampleComments`) for females with AMH above the upper. No inline added. */
+export const AMH_HOLD_COMMENT = '?History';
+/** Females with `value > AMH_UPPER` (and in age coverage) get `high-comment` (hold only). */
+export const AMH_UPPER = 6.8;
+
+export type AmhDecision =
+  | { kind: 'auth'; reason: string }
+  | { kind: 'auth-with-note'; reason: string }
+  | { kind: 'high-comment'; reason: string }
+  | { kind: 'defer'; reason: string }
+  | { kind: 'skip'; reason: string };
+
+export function amhNamePatternSources(): string[] {
+  return TEST_CODE_NAME_PATTERNS[AMH].map((r) => r.source);
+}
+
+/**
+ * Female-only, ages 20–39 (half-open by year: >=20 & <40).
+ * 20–29y: auto-auth [2.2, AMH_UPPER]. 30–34y: auth-with-note [1.5, 2.1], auth [2.2, AMH_UPPER].
+ * 35–39y: auth-with-note [1.0, 2.1], auth [2.2, AMH_UPPER]. Gap (2.1, 2.2) → skip.
+ * Females in coverage with `value > AMH_UPPER` → high-comment (hold `?History`, no inline).
+ * Males / unknown sex / out-of-age females are always skip — never touched.
+ */
+export function decideAmh(
+  rawValue: string | null,
+  ageMonths: number | null,
+  sex: 'M' | 'F' | null
+): AmhDecision {
+  const v = (rawValue ?? '').trim();
+  if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
+  if (/[<>]/.test(v)) {
+    return { kind: 'skip', reason: `value '${v}' contains '<' or '>' (manual review)` };
+  }
+  const n = Number(String(v).replace(/,/g, ''));
+  if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (sex !== 'F') {
+    return {
+      kind: 'skip',
+      reason:
+        sex === 'M' ? 'AMH is female-only (manual review)' : 'sex unknown (manual review)',
+    };
+  }
+  if (ageMonths == null) {
+    return { kind: 'skip', reason: 'age unknown (manual review)' };
+  }
+  const years = ageMonths / 12;
+  if (years < 20 || years >= 40) {
+    return {
+      kind: 'skip',
+      reason: `age ${years.toFixed(1)}y outside 20-39 coverage (manual review)`,
+    };
+  }
+  if (n > AMH_UPPER) {
+    return { kind: 'high-comment', reason: `value ${n} > ${AMH_UPPER} (female, hold)` };
+  }
+
+  if (years >= 20 && years < 30) {
+    if (n < 2.2) {
+      return { kind: 'skip', reason: `value ${n} < 2.2 (20-29y, manual review)` };
+    }
+    return { kind: 'auth', reason: `value ${n} within 2.2-${AMH_UPPER} (20-29y F)` };
+  }
+
+  if (years >= 30 && years < 35) {
+    if (n < 1.5) {
+      return { kind: 'skip', reason: `value ${n} < 1.5 (30-34y, manual review)` };
+    }
+    if (n >= 1.5 && n <= 2.1) {
+      return {
+        kind: 'auth-with-note',
+        reason: `value ${n} in 1.5-2.1 (30-34y, auth + correlate note)`,
+      };
+    }
+    if (n >= 2.2 && n <= AMH_UPPER) {
+      return { kind: 'auth', reason: `value ${n} within 2.2-${AMH_UPPER} (30-34y F)` };
+    }
+    return {
+      kind: 'skip',
+      reason: `value ${n} in (2.1, 2.2) gap (30-34y, manual review)`,
+    };
+  }
+
+  if (years >= 35 && years < 40) {
+    if (n < 1.0) {
+      return { kind: 'skip', reason: `value ${n} < 1.0 (35-39y, manual review)` };
+    }
+    if (n >= 1.0 && n <= 2.1) {
+      return {
+        kind: 'auth-with-note',
+        reason: `value ${n} in 1.0-2.1 (35-39y, auth + correlate note)`,
+      };
+    }
+    if (n >= 2.2 && n <= AMH_UPPER) {
+      return { kind: 'auth', reason: `value ${n} within 2.2-${AMH_UPPER} (35-39y F)` };
+    }
+    return {
+      kind: 'skip',
+      reason: `value ${n} in (2.1, 2.2) gap (35-39y, manual review)`,
+    };
+  }
+
+  return {
+    kind: 'skip',
+    reason: `age ${years.toFixed(1)}y outside AMH bands (manual review)`,
+  };
+}
+
+export const PSA_INLINE_COMMENT = 'Result Rechecked, Kindly correlate clinically';
+export const PSA_HOLD_COMMENT = '? History';
+/** Strict cutoff. n < 4.0 → auth; n >= 4.0 → high-comment (hold + inline). */
+export const PSA_AUTH_UPPER = 4.0;
+
+export type TotalPsaDecision =
+  | { kind: 'auth'; reason: string }
+  | { kind: 'high-comment'; reason: string }
+  | { kind: 'defer'; reason: string }
+  | { kind: 'skip'; reason: string };
+
+export function totalPsaNamePatternSources(): string[] {
+  return TEST_CODE_NAME_PATTERNS[TOTAL_PSA].map((r) => r.source);
+}
+
+/**
+ * Male-only, all ages, single cutoff at PSA_AUTH_UPPER (4.0).
+ * Females and unknown sex always skip (do not touch).
+ * Literal `<` / `>` values skip (manual review). Empty value defers.
+ */
+export function decideTotalPsa(
+  rawValue: string | null,
+  sex: 'M' | 'F' | null
+): TotalPsaDecision {
+  const v = (rawValue ?? '').trim();
+  if (!v) return { kind: 'defer', reason: 'value not yet entered; will re-check' };
+  if (sex !== 'M') {
+    return {
+      kind: 'skip',
+      reason:
+        sex === 'F' ? 'Total PSA is male-only (manual review)' : 'sex unknown (manual review)',
+    };
+  }
+  if (/[<>]/.test(v)) {
+    return { kind: 'skip', reason: `value '${v}' contains '<' or '>' (manual review)` };
+  }
+  const n = Number(String(v).replace(/,/g, ''));
+  if (Number.isNaN(n)) return { kind: 'skip', reason: `unparseable value '${v}' (manual review)` };
+  if (n < 0) return { kind: 'skip', reason: `negative value ${n} (manual review)` };
+  if (n < PSA_AUTH_UPPER) {
+    return { kind: 'auth', reason: `value ${n} < ${PSA_AUTH_UPPER} (auto-auth)` };
+  }
+  return {
+    kind: 'high-comment',
+    reason: `value ${n} >= ${PSA_AUTH_UPPER} (hold + inline)`,
+  };
+}
 
 export type B12Decision =
   | { kind: 'auth'; reason: string }

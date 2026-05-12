@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { B12AuthKind, SidCountersSnapshot, StoredSidEntry, TestCodeId, WsClientEvent } from '@stellar/shared';
 import { getRuntimePaths } from '../runtime/paths.js';
 
-const ALL_CODES: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'CP004'];
+const ALL_CODES: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'BI034', 'BI181', 'CP004'];
 const FLUSH_MS = 150;
 
 type CodeBuckets = {
@@ -43,6 +43,8 @@ let byCode: Record<TestCodeId, CodeBuckets> = {
   BI180: emptyBuckets(),
   BI036: emptyBuckets(),
   MS111: emptyBuckets(),
+  BI034: emptyBuckets(),
+  BI181: emptyBuckets(),
   CP004: emptyBuckets(),
 };
 
@@ -220,6 +222,8 @@ export function initSidCounters(): void {
     BI180: emptyBuckets(),
     BI036: emptyBuckets(),
     MS111: emptyBuckets(),
+    BI034: emptyBuckets(),
+    BI181: emptyBuckets(),
     CP004: emptyBuckets(),
   };
   globalWorkedKeys = new Set();
@@ -261,6 +265,8 @@ export function resetSidCountersForArchive(): void {
     BI180: emptyBuckets(),
     BI036: emptyBuckets(),
     MS111: emptyBuckets(),
+    BI034: emptyBuckets(),
+    BI181: emptyBuckets(),
     CP004: emptyBuckets(),
   };
   globalWorkedKeys = new Set();

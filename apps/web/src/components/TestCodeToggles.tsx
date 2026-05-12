@@ -3,7 +3,7 @@ import { TEST_CODE_LABELS } from '@stellar/shared';
 import { ControlTile } from './ControlTile';
 import { cn } from '@/lib/utils';
 
-const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111'];
+const ORDER: TestCodeId[] = ['BI235', 'BI005', 'BI133', 'BI180', 'BI036', 'MS111', 'BI034', 'BI181'];
 
 /** Vitamin-panel tiles only (same as sidebar `ORDER`); CP004 is the Urine Routine tile. */
 export const VITAMIN_PANEL_TEST_CODES: TestCodeId[] = ORDER;
